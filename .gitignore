@@ -1,0 +1,24 @@
+# Build folders
+x64/
+Debug/
+Release/
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.VC.db
+*.suo
+
+# Build artifacts
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.log
+
+# CMake (if used later)
+CMakeFiles/
+CMakeCache.txt
+
+# Secrets
+.env
