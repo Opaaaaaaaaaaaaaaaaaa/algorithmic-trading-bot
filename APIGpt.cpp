@@ -97,7 +97,7 @@ void APIGpt::loadTickerConfidenceMap(nlohmann::json content)
         std::string ticker = ev["ticker"];
         double confidence = ev["confidence"];
 
-        confidence *= confidence;
+        confidence *= abs(confidence);
 
         tickerConfidenceMap[ticker] -= confidence;
 	}

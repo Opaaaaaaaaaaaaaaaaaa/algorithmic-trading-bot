@@ -129,7 +129,7 @@
   <ItemGroup>
     <ClCompile Include="APIGpt.cpp" />
     <ClCompile Include="APIReddit.cpp" />
-    <ClCompile Include="APITelegramcpp.cpp" />
+    <ClCompile Include="APITelegram.cpp" />
     <ClCompile Include="Engine.cpp" />
     <ClCompile Include="Env.cpp" />
     <ClCompile Include="MyBot.cpp" />
