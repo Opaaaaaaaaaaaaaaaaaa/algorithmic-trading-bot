@@ -53,14 +53,20 @@ void Engine::run()
 
         std::string comments = commentsPayload.dump();
 
-        nlohmann::json gptResponse = gpt.evaluate(comments);
 
-        std::string content = gptResponse["choices"][0]["message"]["content"];
+        try {
+            nlohmann::json gptResponse = gpt.evaluate(comments);
 
-        nlohmann::json evaluations = nlohmann::json::parse(content);
+            std::string content = gptResponse.at("choices").at(0).at("message").at("content");
 
-        for (auto& ev : evaluations["evaluations"]) {
-            std::cout << "Id :" << ev["id"] << ", Ticker: " << ev["ticker"] << ", Confidence: " << ev["confidence"] << "\n";
+            nlohmann::json evaluations = nlohmann::json::parse(content);
+
+            for (auto& ev : evaluations.at("evaluations")) {
+                std::cout << "Id :" << ev["id"] << ", Ticker: " << ev["ticker"] << ", Confidence: " << ev["confidence"] << "\n";
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Bad GPT reply, skipping: " << e.what() << "\n";
         }
 
         if(mktOpen) trigger.store(true);
