@@ -15,12 +15,10 @@ public:
 	void notifyRebalanceMap();
 	void setClient(MyEWrapper& c);
 	void clearClient();
-	bool canTradeNowLocal();
+	bool canTradeNow();
 
 private:
 	std::mutex clientMutex;
-	bool isWeekday(const std::tm& tm);
-	bool isUsMarketHours(const std::tm& tm);
 
 private:
 	APIGpt& gpt;

@@ -1,6 +1,9 @@
 #include "Engine.h"
 #include "MyEWrapper.h"
 
+#include <chrono>
+#include <iostream>
+
 Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w)
     : gpt(g)
     , reddit(r)
@@ -10,7 +13,7 @@ Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>&
     , wait(w)
     , client(nullptr)
 {
-    mktOpen = canTradeNowLocal();
+    mktOpen = canTradeNow();
 }
 
 
@@ -23,7 +26,7 @@ void Engine::run()
             std::lock_guard<std::mutex> lock(clientMutex);
             if (client)
             {
-                bool nowOpen = canTradeNowLocal();
+                bool nowOpen = canTradeNow();
 
                 if (nowOpen != mktOpen)
                 {
@@ -74,40 +77,88 @@ void Engine::setFlag(bool f)
     flag.store(f);
 }
 
-bool Engine::isWeekday(const std::tm& tm)
+namespace {
+
+using namespace std::chrono;
+
+// NYSE full-day closures. Source: nyse.com/markets/hours-calendars.
+// Update this list once a year.
+constexpr year_month_day kNyseHolidays[] = {
+    // 2026
+    2026y / January / 1,    // New Year's Day
+    2026y / January / 19,   // Martin Luther King Jr. Day
+    2026y / February / 16,  // Washington's Birthday
+    2026y / April / 3,      // Good Friday
+    2026y / May / 25,       // Memorial Day
+    2026y / June / 19,      // Juneteenth
+    2026y / July / 3,       // Independence Day (observed)
+    2026y / September / 7,  // Labor Day
+    2026y / November / 26,  // Thanksgiving Day
+    2026y / December / 25,  // Christmas Day
+    // 2027
+    2027y / January / 1,    // New Year's Day
+    2027y / January / 18,   // Martin Luther King Jr. Day
+    2027y / February / 15,  // Washington's Birthday
+    2027y / March / 26,     // Good Friday
+    2027y / May / 31,       // Memorial Day
+    2027y / June / 18,      // Juneteenth (observed)
+    2027y / July / 5,       // Independence Day (observed)
+    2027y / September / 6,  // Labor Day
+    2027y / November / 25,  // Thanksgiving Day
+    2027y / December / 24,  // Christmas Day (observed)
+};
+
+// NYSE early closes (13:00 New York time).
+constexpr year_month_day kNyseEarlyCloses[] = {
+    2026y / November / 27,  // Day after Thanksgiving
+    2026y / December / 24,  // Christmas Eve
+    2027y / November / 26,  // Day after Thanksgiving
+};
+
+constexpr year kLastListedYear = 2027y;
+
+// Same 2-minute buffers as before: start at 9:28, stop 2 minutes before the close.
+constexpr minutes kTradeStart = 9h + 28min;
+constexpr minutes kTradeEnd = 15h + 58min;
+constexpr minutes kTradeEndEarlyClose = 12h + 58min;
+
+template <size_t N>
+bool contains(const year_month_day (&days)[N], const year_month_day& d)
 {
-    return tm.tm_wday >= 1 && tm.tm_wday <= 5;
+    for (const auto& x : days)
+        if (x == d) return true;
+    return false;
 }
 
-bool Engine::isUsMarketHours(const std::tm& tm)
+} // namespace
+
+bool Engine::canTradeNow()
 {
-    int hour = tm.tm_hour;
-    int min = tm.tm_min;
+    // Work in New York time so US daylight saving and the machine's own
+    // time zone don't matter.
+    zoned_time ny{ "America/New_York", system_clock::now() };
+    local_time<minutes> now = floor<minutes>(ny.get_local_time());
+    local_days today = floor<days>(now);
+    year_month_day date{ today };
 
-    if (hour < 15) return false;
-    if (hour == 15 && min < 28) return false;
+    weekday wd{ today };
+    if (wd == Saturday || wd == Sunday) return false;
 
-    if (hour > 22) return false;
-    if (hour == 21 && min > 58) return false;
+    if (date.year() > kLastListedYear) {
+        static bool warned = false;
+        if (!warned) {
+            std::cout << "WARNING: NYSE holiday list in Engine.cpp ends in "
+                      << static_cast<int>(kLastListedYear) << ". Please update it.\n";
+            warned = true;
+        }
+    }
 
-    return true;
-}
+    if (contains(kNyseHolidays, date)) return false;
 
-bool Engine::canTradeNowLocal()
-{
-    std::time_t now = std::time(nullptr);
-    std::tm local{};
+    minutes timeOfDay = now - today;
+    minutes end = contains(kNyseEarlyCloses, date) ? kTradeEndEarlyClose : kTradeEnd;
 
-#ifdef _WIN32
-    localtime_s(&local, &now);
-#else
-    localtime_r(&now, &local);
-#endif
-
-    if (!isWeekday(local)) return false;
-    if (!isUsMarketHours(local)) return false;
-
-    return true;
+    return timeOfDay >= kTradeStart && timeOfDay < end;
 }
 
 void Engine::notifyTradeCycleComplete()
