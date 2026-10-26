@@ -123,7 +123,6 @@ constexpr year_month_day kNyseEarlyCloses[] = {
 
 constexpr year kLastListedYear = 2027y;
 
-// Same 2-minute buffers as before: start at 9:28, stop 2 minutes before the close.
 constexpr minutes kTradeStart = 9h + 28min;
 constexpr minutes kTradeEnd = 15h + 58min;
 constexpr minutes kTradeEndEarlyClose = 12h + 58min;
