@@ -1,7 +1,6 @@
 #include "Engine.h"
 #include "MyEWrapper.h"
 
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iostream>
@@ -60,7 +59,9 @@ void Engine::run()
         const nlohmann::json& all = commentsPayload["data"];
         for (size_t start = 0; start < all.size(); start += kGptBatchSize) {
             nlohmann::json batch = { {"data", nlohmann::json::array()} };
-            for (size_t i = start; i < std::min(all.size(), start + kGptBatchSize); ++i)
+            size_t end = start + kGptBatchSize;
+            if (end > all.size()) end = all.size();
+            for (size_t i = start; i < end; ++i)
                 batch["data"].push_back(all[i]);
 
             try {
