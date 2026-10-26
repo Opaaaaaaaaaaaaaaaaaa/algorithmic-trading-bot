@@ -22,7 +22,7 @@
 #include <cstdio>
 #include <optional>
 
-// Order sizing. 1 point of score = this many dollars of stock.
+
 const double kDollarsPerPoint = 500.0;
 // Alert if an order still isn't fully filled after this long.
 const auto kSlowFill = std::chrono::minutes(5);
@@ -301,7 +301,6 @@ void MyEWrapper::executeTrades()
 
 	for (auto& [ticker, score] : localCopy)
 	{
-		// Only trade once a ticker's score reaches 1 point either way.
 		if (std::abs(score) < 1.0) continue;
 
 		// Recently rejected by IBKR: wait before trying this ticker again.
@@ -314,13 +313,13 @@ void MyEWrapper::executeTrades()
 		}
 
 		std::optional<double> price = prices ? prices->get(ticker) : std::nullopt;
-		if (!price) continue;  // no price right now: keep the score, try again next minute
+		if (!price) continue;  
 
-		// Size the order in dollars, so a $800 stock and a $100 stock get the same exposure.
+		
 		double dollars = std::abs(score) * kDollarsPerPoint;
 
 		int shares = static_cast<int>(dollars / *price);
-		if (shares == 0) continue;  // can't afford 1 share yet: the score keeps building
+		if (shares == 0) continue; 
 
 		Contract contr;
 		contr.symbol = ticker;
@@ -336,7 +335,7 @@ void MyEWrapper::executeTrades()
 
 		placeAndRemember(contr, o, shares, *price / kDollarsPerPoint);
 
-		// Only the dollars actually traded come off the score; the rest carries over.
+		
 		double used = shares * *price / kDollarsPerPoint;
 		gpt->useScore(ticker, score > 0 ? used : -used);
 

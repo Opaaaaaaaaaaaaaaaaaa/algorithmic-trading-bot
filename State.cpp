@@ -45,8 +45,6 @@ void StateStore::set(const std::string& key, nlohmann::json value)
 
 void StateStore::write()
 {
-    // Write to a temp file, then swap it in, so a crash mid-write
-    // never leaves a half-written state file behind.
     const std::string tmp = path + ".tmp";
     {
         std::ofstream out(tmp, std::ios::trunc);

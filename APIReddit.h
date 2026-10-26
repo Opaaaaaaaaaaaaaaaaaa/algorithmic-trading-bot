@@ -27,7 +27,7 @@ private:
 
 private:
     nlohmann::json latestPayload;
-    std::unordered_map<std::string, std::time_t> seen; // Reddit id -> created time
+    std::unordered_map<std::string, std::time_t> seen; 
     std::time_t lastFetchTime = 0;
     int cutofftime;
     std::chrono::system_clock::time_point tokenExpiry;

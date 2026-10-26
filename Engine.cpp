@@ -18,8 +18,7 @@ Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>&
     , state(s)
     , alerts(a)
 {
-    // Only skip the market-open steps (positions + rebalance) if they already
-    // ran today. After a restart before they ran, they run on the first loop.
+    
     nlohmann::json last = state.get("lastMarketOpen");
     bool alreadyOpenedToday = last.is_string() && last.get<std::string>() == todayInNewYork();
     mktOpen = canTradeNow() && alreadyOpenedToday;
@@ -66,8 +65,7 @@ void Engine::run()
             std::cout << comment["id"] << " :" << comment["text"] << "\n\n";
         }
 
-        // Send GPT at most kGptBatchSize comments per call; it reads small
-        // batches more accurately. No new comments means no GPT call at all.
+       
         const nlohmann::json& all = commentsPayload["data"];
         for (size_t start = 0; start < all.size(); start += kGptBatchSize) {
             nlohmann::json batch = { {"data", nlohmann::json::array()} };
@@ -95,7 +93,7 @@ void Engine::run()
             }
         }
 
-        // Remember which comments are done (scores were saved by evaluate).
+
         reddit.saveState();
 
         if(mktOpen) trigger.store(true);
