@@ -40,6 +40,12 @@ Consider text in the style of WallStreetBets.
 
 Extract a ticker only if a trade is recommended. Never hallucinate tickers.
 
+Only use a ticker that the comment itself names, either as a symbol (TSLA, $TSLA) or as a clearly named company or fund (tesla -> TSLA). Never take a ticker from a different comment.
+
+If a comment names no ticker or company, return nothing for it. Never turn generic words like "calls", "puts", "the market" or "stonks" into SPY, QQQ or any other ticker.
+
+Only output stocks and ETFs. Never output index symbols such as SPX, XSP, RUT, NDX or VIX, because they cannot be bought as shares.
+
 If no recommendation is present, return an empty list.
 
 Interpret true intent, not literal wording.
@@ -102,6 +108,13 @@ Output:
 
 Input:
 id: 0, text: STONKS GO UP
+Output:
+{ "evaluations": [] }
+
+Input:
+id: 0, text: Believe it or not, calls
+id: 1, text: Sounds good to me, calls.
+id: 2, text: XSP calls for Friday
 Output:
 { "evaluations": [] }
 

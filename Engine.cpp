@@ -1,9 +1,12 @@
 #include "Engine.h"
 #include "MyEWrapper.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iostream>
+
+const size_t kGptBatchSize = 100;
 
 Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s)
     : gpt(g)
@@ -52,12 +55,16 @@ void Engine::run()
             std::cout << comment["id"] << " :" << comment["text"] << "\n\n";
         }
 
-        std::string comments = commentsPayload.dump();
+        // Send GPT at most kGptBatchSize comments per call; it reads small
+        // batches more accurately. No new comments means no GPT call at all.
+        const nlohmann::json& all = commentsPayload["data"];
+        for (size_t start = 0; start < all.size(); start += kGptBatchSize) {
+            nlohmann::json batch = { {"data", nlohmann::json::array()} };
+            for (size_t i = start; i < std::min(all.size(), start + kGptBatchSize); ++i)
+                batch["data"].push_back(all[i]);
 
-        // Only call GPT when there is something new to read.
-        if (!commentsPayload["data"].empty()) {
             try {
-                nlohmann::json gptResponse = gpt.evaluate(comments);
+                nlohmann::json gptResponse = gpt.evaluate(batch.dump());
 
                 std::string content = gptResponse.at("choices").at(0).at("message").at("content");
 
