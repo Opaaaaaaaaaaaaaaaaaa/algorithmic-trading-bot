@@ -24,6 +24,10 @@
 
 // Order sizing. 1 point of score = this many dollars of stock.
 const double kDollarsPerPoint = 500.0;
+// Alert if an order still isn't fully filled after this long.
+const auto kSlowFill = std::chrono::minutes(5);
+// After IBKR rejects an order for a ticker, wait this long before trying that ticker again.
+const auto kRetryAfterReject = std::chrono::minutes(15);
 
 
 const int PING_DEADLINE = 2;
@@ -106,11 +110,16 @@ void MyEWrapper::error(int id, time_t errorTime, int errorCode, const std::strin
 	if (!alerts) return;
 
 	// A message about one of our orders. Codes 399 and 2100-2999 are only warnings.
-	auto order = m_orderInfo.find(id);
-	bool warningOnly = errorCode == 399 || (errorCode >= 2100 && errorCode < 3000);
-	if (order != m_orderInfo.end() && !warningOnly) {
-		alerts->now("[ALERT] IBKR rejected order " + order->second + ": " + errorString +
-			" (code " + std::to_string(errorCode) + ")");
+	if (book && book->orders.count(id)) {
+		std::string what = errorString + " (code " + std::to_string(errorCode) + ")";
+		bool warningOnly = errorCode == 399 || (errorCode >= 2100 && errorCode < 3000);
+		// 200 unknown symbol, 201 rejected, 202 cancelled, 203 not allowed for this account.
+		bool orderIsDead = errorCode >= 200 && errorCode <= 203;
+
+		if (orderIsDead)
+			endOrder(id, "IBKR rejected it: " + what, true);
+		else if (!warningOnly)
+			alerts->now("[ALERT] IBKR message about order " + book->orders[id].label() + ": " + what);
 	}
 
 	// TWS lost / regained its own connection to IBKR's servers.
@@ -182,10 +191,100 @@ void MyEWrapper::setAlerts(Alerts& a)
 	alerts = &a;
 }
 
-void MyEWrapper::placeAndRemember(const Contract& contr, const Order& o, int shares)
+void MyEWrapper::setOrderBook(OrderBook& b)
 {
-	m_orderInfo[m_orderId] = o.action + " " + std::to_string(shares) + " " + contr.symbol;
+	book = &b;
+}
+
+void MyEWrapper::placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare)
+{
+	if (book) {
+		TrackedOrder t;
+		t.symbol = contr.symbol;
+		t.action = o.action;
+		t.shares = shares;
+		t.pointsPerShare = pointsPerShare;
+		t.placed = std::chrono::steady_clock::now();
+		book->orders[m_orderId] = t;
+	}
 	m_pClient->placeOrder(m_orderId++, contr, o);
+}
+
+void MyEWrapper::orderStatus(OrderId orderId, const std::string& status, Decimal filled, Decimal remaining,
+	double, int, int, double, int, const std::string&, double)
+{
+	onOrderStatus(orderId, status, std::stod(DecimalFunctions::decimalToString(filled)),
+		std::stod(DecimalFunctions::decimalToString(remaining)));
+}
+
+void MyEWrapper::orderStatus(OrderId orderId, const std::string& status, Decimal filled, Decimal remaining,
+	double, long long, int, double, int, const std::string&, double)
+{
+	onOrderStatus(orderId, status, std::stod(DecimalFunctions::decimalToString(filled)),
+		std::stod(DecimalFunctions::decimalToString(remaining)));
+}
+
+void MyEWrapper::onOrderStatus(long orderId, const std::string& status, double filled, double remaining)
+{
+	if (!book) return;
+	auto it = book->orders.find(orderId);
+	if (it == book->orders.end()) return;  // not ours, or already finished
+
+	it->second.filled = filled;
+
+	if (status == "Filled" || remaining <= 0) {
+		if (alerts) alerts->ok("Orders for " + it->second.symbol);
+		book->orders.erase(it);
+	}
+	else if (status == "Cancelled" || status == "ApiCancelled" || status == "Inactive") {
+		endOrder(orderId, "IBKR ended it (" + status + ")", false);
+	}
+}
+
+// The order won't fill any further: give the unfilled part's score back and alert.
+void MyEWrapper::endOrder(long orderId, const std::string& why, bool rejected)
+{
+	auto it = book->orders.find(orderId);
+	if (it == book->orders.end()) return;
+	TrackedOrder t = it->second;
+	book->orders.erase(it);
+
+	double unfilled = t.shares - t.filled;
+	std::string msg = t.label() + ": " + why + ". ";
+	if (t.filled > 0) {
+		char part[80];
+		std::snprintf(part, sizeof(part), "%g of %d filled. ", t.filled, t.shares);
+		msg += part;
+	}
+
+	if (unfilled > 0 && t.pointsPerShare > 0) {
+		// Undo the score taken off for the shares that never traded.
+		double points = unfilled * t.pointsPerShare;
+		gpt->useScore(t.symbol, t.action == "BUY" ? -points : points);
+		msg += "Score for the unfilled shares was given back";
+		msg += rejected ? ", trying again in 15 min." : ".";
+	}
+
+	if (rejected) book->retryAfter[t.symbol] = std::chrono::steady_clock::now() + kRetryAfterReject;
+
+	printf("Order ended: %s\n", msg.c_str());
+	// Keyed per ticker: repeated rejections of the same ticker alert only once,
+	// and you get an [OK] once an order for it fills again.
+	if (alerts) alerts->fail("Orders for " + t.symbol, msg, std::chrono::seconds(0));
+}
+
+void MyEWrapper::checkOrders()
+{
+	if (!book || !alerts) return;
+	auto now = std::chrono::steady_clock::now();
+	for (auto& [id, t] : book->orders) {
+		if (t.slowAlerted || now - t.placed < kSlowFill) continue;
+		t.slowAlerted = true;
+		char msg[200];
+		std::snprintf(msg, sizeof(msg), "[ALERT] %s: only %g of %d filled after 5 min, the rest is still open",
+			t.label().c_str(), t.filled, t.shares);
+		alerts->now(msg);
+	}
 }
 
 // IBKR reports each (partial) fill here. Collected for the hourly Telegram summary.
@@ -204,6 +303,15 @@ void MyEWrapper::executeTrades()
 	{
 		// Only trade once a ticker's score reaches 1 point either way.
 		if (std::abs(score) < 1.0) continue;
+
+		// Recently rejected by IBKR: wait before trying this ticker again.
+		if (book) {
+			auto wait = book->retryAfter.find(ticker);
+			if (wait != book->retryAfter.end()) {
+				if (std::chrono::steady_clock::now() < wait->second) continue;
+				book->retryAfter.erase(wait);
+			}
+		}
 
 		std::optional<double> price = prices ? prices->get(ticker) : std::nullopt;
 		if (!price) continue;  // no price right now: keep the score, try again next minute
@@ -226,7 +334,7 @@ void MyEWrapper::executeTrades()
 		o.tif = "DAY";
 		o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(shares));
 
-		placeAndRemember(contr, o, shares);
+		placeAndRemember(contr, o, shares, *price / kDollarsPerPoint);
 
 		// Only the dollars actually traded come off the score; the rest carries over.
 		double used = shares * *price / kDollarsPerPoint;
@@ -254,6 +362,13 @@ bool MyEWrapper::triggerTrades()
 void MyEWrapper::waitMktOpen()
 {
 	m_state = ST_WAIT_MARKET_OPEN;
+
+	// Market closed: DAY orders that didn't fully fill are over.
+	if (book) {
+		std::vector<long> open;
+		for (auto& [id, t] : book->orders) open.push_back(id);
+		for (long id : open) endOrder(id, "not filled by the market close", false);
+	}
 }
 
 void MyEWrapper::mktOpen()
@@ -288,7 +403,7 @@ void MyEWrapper::rebalance()
 
 		o.action = (pos > 0) ? "SELL" : "BUY";
 
-		placeAndRemember(contr, o, half);
+		placeAndRemember(contr, o, half, 0.0);
 
 		printf("Rebalance order placed: %s %d %s\n", o.action.c_str(), half, symbol.c_str());
 	}

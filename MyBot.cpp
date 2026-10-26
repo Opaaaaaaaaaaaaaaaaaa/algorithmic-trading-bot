@@ -52,6 +52,7 @@ int main(int argc, char** argv)
 	if (!prices.hasKey())
 		alerts.now("[ALERT] FINNHUB_KEY is missing from .env, so the bot can't place any orders");
 	Engine engine(chatGpt, reddit, trigger, open, wait, state, alerts);
+	OrderBook orderBook;
 	std::thread engineThread(&Engine::run, &engine);
 
 	for (;;) {
@@ -63,6 +64,7 @@ int main(int argc, char** argv)
 		client.setGpt(chatGpt);
 		client.setPrices(prices);
 		client.setAlerts(alerts);
+		client.setOrderBook(orderBook);
 		if (connectOptions) {
 			client.setConnectOptions(connectOptions);
 		}
@@ -110,6 +112,7 @@ int main(int argc, char** argv)
 			else
 				alerts.ok("Engine");
 
+			client.checkOrders();
 			alerts.tick();
 		}
 

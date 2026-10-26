@@ -10,6 +10,9 @@
 #include "Alerts.h"
 
 #include <memory>
+#include <chrono>
+#include <string>
+#include <unordered_map>
 #include <vector>
 #include <cstring>
 #include <mutex>
@@ -30,6 +33,23 @@ enum State {
 	ST_TRADE_ACK
 };
 
+// One order the bot placed, followed until it is fully filled or ends.
+struct TrackedOrder {
+	std::string symbol, action;      // action is "BUY" or "SELL"
+	int shares = 0;
+	double pointsPerShare = 0;       // score taken off per share when placed (0 for rebalance orders)
+	double filled = 0;
+	std::chrono::steady_clock::time_point placed;
+	bool slowAlerted = false;
+	std::string label() const { return action + " " + std::to_string(shares) + " " + symbol; }
+};
+
+// Lives in main() so it survives reconnects to TWS (not restarts of the bot).
+struct OrderBook {
+	std::unordered_map<long, TrackedOrder> orders;  // order id -> order
+	std::unordered_map<std::string, std::chrono::steady_clock::time_point> retryAfter;  // symbol -> wait until
+};
+
 class MyEWrapper : public DefaultEWrapper
 {
 public:
@@ -46,6 +66,14 @@ public:
 	void position(const std::string& account, const Contract& contract, Decimal position, double avgCost);
 	void positionEnd();
 	void execDetails(int reqId, const Contract& contract, const Execution& execution) override;
+	// IBKR's order status update. permId is int in some TWS API versions and long long in
+	// others; both are declared so whichever one your version uses gets called.
+	void orderStatus(OrderId orderId, const std::string& status, Decimal filled, Decimal remaining,
+		double avgFillPrice, int permId, int parentId, double lastFillPrice, int clientId,
+		const std::string& whyHeld, double mktCapPrice);
+	void orderStatus(OrderId orderId, const std::string& status, Decimal filled, Decimal remaining,
+		double avgFillPrice, long long permId, int parentId, double lastFillPrice, int clientId,
+		const std::string& whyHeld, double mktCapPrice);
 
 public:
 	void myTest();
@@ -53,6 +81,9 @@ public:
 	void setGpt(APIGpt& g);
 	void setPrices(APIPrice& p);
 	void setAlerts(Alerts& a);
+	void setOrderBook(OrderBook& b);
+	// Call regularly: alerts about orders that are taking too long to fill.
+	void checkOrders();
 	void executeTrades();
 	void waitMktOpen();
 	void mktOpen();
@@ -66,9 +97,11 @@ private:
 	APIGpt* gpt;
 	APIPrice* prices = nullptr;
 	Alerts* alerts = nullptr;
-	std::unordered_map<long, std::string> m_orderInfo;  // order id -> "SELL 3 NU", for alerts
+	OrderBook* book = nullptr;
 
-	void placeAndRemember(const Contract& contr, const Order& o, int shares);
+	void placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare);
+	void onOrderStatus(long orderId, const std::string& status, double filled, double remaining);
+	void endOrder(long orderId, const std::string& why, bool rejected);
 	std::unordered_map<std::string, double> m_rebalanceMap;
 
 	EReaderOSSignal m_osSignal;
