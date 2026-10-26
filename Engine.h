@@ -2,7 +2,6 @@
 
 #include "APIReddit.h"
 #include "APIGpt.h"
-//#include "MyEWrapper.h"
 
 class MyEWrapper;
 
@@ -10,7 +9,6 @@ class Engine {
 public: 
 	Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w);
 	void run();
-	void setFlag(bool f);
 	void notifyTradeCycleComplete();
 	void notifyRebalanceMap();
 	void setClient(MyEWrapper& c);

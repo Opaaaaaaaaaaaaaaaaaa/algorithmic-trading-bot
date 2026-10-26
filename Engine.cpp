@@ -78,10 +78,6 @@ void Engine::run()
     }
 }
 
-void Engine::setFlag(bool f)
-{
-    flag.store(f);
-}
 
 namespace {
 

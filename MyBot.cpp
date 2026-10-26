@@ -33,7 +33,7 @@ int main(int argc, char** argv)
 	int clientId = 0;
 
 	unsigned attempt = 0;
-	printf("Start of C++ Socket Client Test %u\n", attempt);
+	printf("Start\n", attempt);
 
 	std::atomic<bool> trigger = false;
 	std::atomic<bool> open = false;
@@ -93,5 +93,5 @@ int main(int argc, char** argv)
 		std::this_thread::sleep_for(std::chrono::seconds(SLEEP_TIME));
 	}
 
-	printf("End of C++ Socket Client Test\n");
+	printf("End\n");
 }

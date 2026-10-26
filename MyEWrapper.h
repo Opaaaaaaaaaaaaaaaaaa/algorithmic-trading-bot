@@ -4,7 +4,6 @@
 #include "EReaderOSSignal.h"
 #include "EReader.h"
 #include "OrderState.h"
-//#include "Engine.h"
 #include "APIGpt.h"
 #include "APITelegram.h"
 
@@ -62,7 +61,6 @@ private:
 	APITelegram telegram;
 	APIGpt* gpt;
 	std::unordered_map<std::string, double> m_rebalanceMap;
-	std::mutex mapMutex;
 
 	EReaderOSSignal m_osSignal;
 	EClientSocket* const m_pClient;

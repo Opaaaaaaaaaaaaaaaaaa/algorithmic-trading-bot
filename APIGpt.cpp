@@ -4,11 +4,13 @@
 APIGpt::APIGpt()
 {
     body = {
-        {"model", "gpt-4o-mini"},
-        {"messages", {
-            {{"role", "system"}, {"content", gptRole}},
-            {{"role", "user"},   {"content", ""}}
-        }}
+    {"model", "gpt-6-luna"},
+    {"reasoning_effort", "low"},
+    {"response_format", {{"type", "json_object"}}},
+    {"messages", {
+        {{"role", "system"}, {"content", gptRole}},
+        {{"role", "user"},   {"content", ""}}
+    }}
     };
 }
 
