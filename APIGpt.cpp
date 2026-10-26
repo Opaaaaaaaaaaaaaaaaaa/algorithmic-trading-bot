@@ -24,7 +24,7 @@ APIGpt::APIGpt(StateStore& s)
     }
 }
 
-// Call with mapMutex held.
+
 void APIGpt::saveLocked()
 {
     state.set("confidence", tickerConfidenceMap);
@@ -123,8 +123,7 @@ void APIGpt::loadTickerConfidenceMap(nlohmann::json content)
     saveLocked();
 }
 
-// Called after an order: take the part of the score that was traded off it
-// (positive after a buy, negative after a sell) and save straight away.
+
 void APIGpt::useScore(const std::string& ticker, double amount)
 {
     std::lock_guard<std::mutex> lock(mapMutex);

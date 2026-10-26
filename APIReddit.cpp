@@ -1,6 +1,6 @@
 #include "APIReddit.h"
 
-// Reddit returns at most 100 items per request and keeps about 1000 in a listing.
+
 const int kPageSize = 100;
 const int kMaxPages = 10;
 
@@ -69,11 +69,10 @@ bool APIReddit::fetch(std::string what)
     nlohmann::json dataArray = nlohmann::json::array();
     int cnt = 0;
     int requests = 0;
-    bool caughtUp = false;  // reached a comment we already have, or one older than the cutoff
-    std::string after;      // Reddit's marker for the next (older) page
+    bool caughtUp = false;  
+    std::string after;      
 
-    // Newest comments come first. Keep paging back until we reach one we've
-    // already processed, so nothing posted since the last fetch is missed.
+
     while (!caughtUp && requests < kMaxPages)
     {
         cpr::Parameters params = after.empty()
@@ -94,7 +93,7 @@ bool APIReddit::fetch(std::string what)
             std::cout << "API request failed: " << api_res.status_code << "\n";
             std::cout << api_res.text << "\n";
             if (cnt == 0) return false;
-            break;  // keep the pages we already got
+            break;  
         }
 
         nlohmann::json feed;
@@ -156,7 +155,7 @@ bool APIReddit::fetch(std::string what)
     }
     lastFetchTime = now;
 
-    // Forget comments older than the cutoff; they can't come back anyway.
+    
     for (auto it = seen.begin(); it != seen.end(); )
         it = (it->second < cutoff) ? seen.erase(it) : std::next(it);
 

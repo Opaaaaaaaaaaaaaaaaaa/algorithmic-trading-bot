@@ -5,19 +5,16 @@
 #include <string>
 #include <unordered_map>
 
-// Looks up current stock prices from Finnhub (finnhub.io) over HTTP.
-// Needs FINNHUB_KEY in .env.
+
 class APIPrice {
 public:
     APIPrice();
 
-    // Current price, or nothing if none is available right now.
-    // Unknown symbols (e.g. made-up tickers) also return nothing.
     std::optional<double> get(const std::string& ticker);
 
 private:
     struct Entry {
-        std::optional<double> price;   // empty = Finnhub doesn't know this symbol
+        std::optional<double> price;   
         std::chrono::steady_clock::time_point fetched;
     };
 
