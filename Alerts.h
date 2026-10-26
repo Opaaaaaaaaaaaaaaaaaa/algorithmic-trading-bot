@@ -9,10 +9,7 @@
 
 #include "APITelegram.h"
 
-// Telegram notifications:
-//  - problems: one message when something keeps failing, one when it recovers
-//  - an hourly summary of filled orders
-// Safe to use from both the engine thread and the IBKR thread.
+
 class Alerts {
 public:
     // Something is working (again). Sends "working again" if we had alerted about it.

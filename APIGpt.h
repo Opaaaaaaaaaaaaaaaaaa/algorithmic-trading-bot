@@ -44,6 +44,8 @@ Only use a ticker that the comment itself names, either as a symbol (TSLA, $TSLA
 
 If a comment names no ticker or company, return nothing for it. Never turn generic words like "calls", "puts", "the market" or "stonks" into SPY, QQQ or any other ticker.
 
+Never output placeholder or made-up tickers such as PENDING, UNKNOWN, NONE, N/A or TBD. If you can't tell which ticker a comment means, return nothing for it.
+
 Only output stocks and ETFs. Never output index symbols such as SPX, XSP, RUT, NDX or VIX, because they cannot be bought as shares.
 
 If no recommendation is present, return an empty list.
