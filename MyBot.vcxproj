@@ -128,6 +128,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="APIGpt.cpp" />
+    <ClCompile Include="APIPrice.cpp" />
     <ClCompile Include="APIReddit.cpp" />
     <ClCompile Include="APITelegram.cpp" />
     <ClCompile Include="Engine.cpp" />
@@ -138,6 +139,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="APIGpt.h" />
+    <ClInclude Include="APIPrice.h" />
     <ClInclude Include="APIReddit.h" />
     <ClInclude Include="APITelegram.h" />
     <ClInclude Include="Engine.h" />

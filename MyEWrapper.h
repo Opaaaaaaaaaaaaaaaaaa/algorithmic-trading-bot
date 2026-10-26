@@ -6,6 +6,7 @@
 #include "OrderState.h"
 #include "APIGpt.h"
 #include "APITelegram.h"
+#include "APIPrice.h"
 
 #include <memory>
 #include <vector>
@@ -48,6 +49,7 @@ public:
 	void myTest();
 	void setEngine(Engine& e);
 	void setGpt(APIGpt& g);
+	void setPrices(APIPrice& p);
 	void executeTrades();
 	void waitMktOpen();
 	void mktOpen();
@@ -60,6 +62,7 @@ private:
 	Engine* engine;
 	APITelegram telegram;
 	APIGpt* gpt;
+	APIPrice* prices = nullptr;
 	std::unordered_map<std::string, double> m_rebalanceMap;
 
 	EReaderOSSignal m_osSignal;

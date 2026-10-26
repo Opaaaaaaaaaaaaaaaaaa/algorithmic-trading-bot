@@ -185,13 +185,6 @@ bool Engine::canTradeNow()
     return timeOfDay >= kTradeStart && timeOfDay < end;
 }
 
-// Called right after orders are placed. Update and save the scores straight
-// away, so a restart can't place the same orders a second time.
-void Engine::notifyTradeCycleComplete()
-{
-    gpt.updateTickerConfidenceMap();
-}
-
 void Engine::notifyRebalanceMap()
 {
     gpt.rebalanceTickerConfidenceMap();

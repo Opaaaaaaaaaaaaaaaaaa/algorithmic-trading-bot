@@ -14,7 +14,7 @@ class APIGpt {
 public:
     explicit APIGpt(StateStore& s);
 	nlohmann::json evaluate(const std::string& feed);
-    void updateTickerConfidenceMap();
+    void useScore(const std::string& ticker, double amount);
     void rebalanceTickerConfidenceMap();
     std::unordered_map<std::string, double> snapshot();
 

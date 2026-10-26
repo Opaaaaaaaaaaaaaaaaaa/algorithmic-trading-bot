@@ -18,6 +18,12 @@
 #include <ctime>
 #include <fstream>
 #include <cstdint>
+#include <cmath>
+#include <cstdio>
+#include <optional>
+
+// Order sizing. 1 point of score = this many dollars of stock.
+const double kDollarsPerPoint = 500.0;
 
 
 const int PING_DEADLINE = 2;
@@ -152,12 +158,29 @@ void MyEWrapper::setGpt(APIGpt& g)
 	gpt = &g;
 }
 
+void MyEWrapper::setPrices(APIPrice& p)
+{
+	prices = &p;
+}
+
 void MyEWrapper::executeTrades()
 {
 	std::unordered_map<std::string, double> localCopy = gpt->snapshot();
 
-	for (auto& [ticker, instruction] : localCopy)
+	for (auto& [ticker, score] : localCopy)
 	{
+		// Only trade once a ticker's score reaches 1 point either way.
+		if (std::abs(score) < 1.0) continue;
+
+		std::optional<double> price = prices ? prices->get(ticker) : std::nullopt;
+		if (!price) continue;  // no price right now: keep the score, try again next minute
+
+		// Size the order in dollars, so a $800 stock and a $100 stock get the same exposure.
+		double dollars = std::abs(score) * kDollarsPerPoint;
+
+		int shares = static_cast<int>(dollars / *price);
+		if (shares == 0) continue;  // can't afford 1 share yet: the score keeps building
+
 		Contract contr;
 		contr.symbol = ticker;
 		contr.secType = "STK";
@@ -165,25 +188,23 @@ void MyEWrapper::executeTrades()
 		contr.currency = "USD";
 
 		Order o;
-		if(instruction >= 1) o.action = "BUY";
-		else if(instruction <= -1) o.action = "SELL";
-		else continue;
-
-		int qt = static_cast<int>(instruction);
-		int amount = abs(qt);
-
+		o.action = score > 0 ? "BUY" : "SELL";
 		o.orderType = "MKT";
 		o.tif = "DAY";
-		o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(amount));
-
-		printf("%d\n", qt);
+		o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(shares));
 
 		m_pClient->placeOrder(m_orderId++, contr, o);
 
-		telegram.sendMessage("Order placed: Ticker " + ticker + " Amount " + std::to_string(qt));
-	}
+		// Only the dollars actually traded come off the score; the rest carries over.
+		double used = shares * *price / kDollarsPerPoint;
+		gpt->useScore(ticker, score > 0 ? used : -used);
 
-	engine->notifyTradeCycleComplete();
+		char msg[200];
+		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)",
+			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price);
+		printf("%s\n", msg);
+		telegram.sendMessage(msg);
+	}
 
 	m_state = ST_TRADE_ACK;
 }

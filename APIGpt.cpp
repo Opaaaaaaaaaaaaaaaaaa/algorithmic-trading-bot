@@ -123,16 +123,12 @@ void APIGpt::loadTickerConfidenceMap(nlohmann::json content)
     saveLocked();
 }
 
-void APIGpt::updateTickerConfidenceMap()
-{        
+// Called after an order: take the part of the score that was traded off it
+// (positive after a buy, negative after a sell) and save straight away.
+void APIGpt::useScore(const std::string& ticker, double amount)
+{
     std::lock_guard<std::mutex> lock(mapMutex);
-
-    for (auto& [ticker, instruction] : tickerConfidenceMap)
-    {
-        int qt = static_cast<int>(instruction);
-        instruction -= qt;
-    }
-
+    tickerConfidenceMap[ticker] -= amount;
     saveLocked();
 }
  

@@ -14,6 +14,7 @@
 #include "APITelegram.h"
 #include "Engine.h"
 #include "State.h"
+#include "APIPrice.h"
 
 #include <iostream>
 #include <cpr/cpr.h>
@@ -42,6 +43,7 @@ int main(int argc, char** argv)
 	StateStore state("bot_state.json");
 	APIGpt chatGpt(state);
 	APIReddit reddit(state);
+	APIPrice prices;
 	Engine engine(chatGpt, reddit, trigger, open, wait, state);
 	std::thread engineThread(&Engine::run, &engine);
 
@@ -52,6 +54,7 @@ int main(int argc, char** argv)
 		MyEWrapper client;
 		client.setEngine(engine);
 		client.setGpt(chatGpt);
+		client.setPrices(prices);
 		if (connectOptions) {
 			client.setConnectOptions(connectOptions);
 		}
