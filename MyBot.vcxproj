@@ -134,6 +134,7 @@
     <ClCompile Include="Env.cpp" />
     <ClCompile Include="MyBot.cpp" />
     <ClCompile Include="MyEWrapper.cpp" />
+    <ClCompile Include="State.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="APIGpt.h" />
@@ -142,6 +143,7 @@
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Env.h" />
     <ClInclude Include="MyEWrapper.h" />
+    <ClInclude Include="State.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\source\cppclient\client\TwsSocketClientStatic.vcxproj">

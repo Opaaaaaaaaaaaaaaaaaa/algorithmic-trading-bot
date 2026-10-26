@@ -13,6 +13,7 @@
 #include "APIGpt.h"
 #include "APITelegram.h"
 #include "Engine.h"
+#include "State.h"
 
 #include <iostream>
 #include <cpr/cpr.h>
@@ -38,9 +39,10 @@ int main(int argc, char** argv)
 	std::atomic<bool> trigger = false;
 	std::atomic<bool> open = false;
 	std::atomic<bool> wait = false;
-	APIGpt chatGpt;
-	APIReddit reddit;
-	Engine engine(chatGpt, reddit, trigger, open, wait);
+	StateStore state("bot_state.json");
+	APIGpt chatGpt(state);
+	APIReddit reddit(state);
+	Engine engine(chatGpt, reddit, trigger, open, wait, state);
 	std::thread engineThread(&Engine::run, &engine);
 
 	for (;;) {

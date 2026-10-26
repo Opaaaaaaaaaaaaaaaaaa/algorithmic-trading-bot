@@ -22,3 +22,8 @@ CMakeCache.txt
 
 # Secrets
 .env
+
+# Bot memory (saved between runs)
+bot_state.json
+bot_state.json.tmp
+bot_state.json.bad

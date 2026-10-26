@@ -9,21 +9,26 @@
 #include <string>
 #include <unordered_map>
 
+#include "State.h"
+
 
 class APIReddit {
 public:
-    APIReddit();
+    explicit APIReddit(StateStore& s);
     bool fetchComments();
 	bool fetchPosts();
     nlohmann::json getLatestPayload() const;
+    void saveState();
 
 private:
     void init();
     bool fetch(std::string what);
+    void loadState();
 
 private:
     nlohmann::json latestPayload;
     std::unordered_map<std::string, std::time_t> seen; // Reddit id -> created time
+    std::time_t lastFetchTime = 0;
     int cutofftime;
     std::chrono::system_clock::time_point tokenExpiry;
 
@@ -35,4 +40,5 @@ private:
     const std::string password = std::getenv("REDDIT_PASSWORD");
     const std::string user_agent;
     std::string token;
+    StateStore& state;
 };

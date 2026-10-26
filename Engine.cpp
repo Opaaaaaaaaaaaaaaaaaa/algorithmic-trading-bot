@@ -2,9 +2,10 @@
 #include "MyEWrapper.h"
 
 #include <chrono>
+#include <cstdio>
 #include <iostream>
 
-Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w)
+Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s)
     : gpt(g)
     , reddit(r)
     , flag(true)
@@ -12,8 +13,13 @@ Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>&
     , open(o)
     , wait(w)
     , client(nullptr)
+    , state(s)
 {
-    mktOpen = canTradeNow();
+    // Only skip the market-open steps (positions + rebalance) if they already
+    // ran today. After a restart before they ran, they run on the first loop.
+    nlohmann::json last = state.get("lastMarketOpen");
+    bool alreadyOpenedToday = last.is_string() && last.get<std::string>() == todayInNewYork();
+    mktOpen = canTradeNow() && alreadyOpenedToday;
 }
 
 
@@ -38,14 +44,6 @@ void Engine::run()
             }
         }
 
-        if(rebalance.exchange(false, std::memory_order_acq_rel)) {
-            gpt.rebalanceTickerConfidenceMap();
-        }
-
-        if(tradeCycleComplete.exchange(false, std::memory_order_acq_rel)) {
-            gpt.updateTickerConfidenceMap();
-        }
-
         reddit.fetchComments();
 
         nlohmann::json commentsPayload = reddit.getLatestPayload();
@@ -56,21 +54,26 @@ void Engine::run()
 
         std::string comments = commentsPayload.dump();
 
+        // Only call GPT when there is something new to read.
+        if (!commentsPayload["data"].empty()) {
+            try {
+                nlohmann::json gptResponse = gpt.evaluate(comments);
 
-        try {
-            nlohmann::json gptResponse = gpt.evaluate(comments);
+                std::string content = gptResponse.at("choices").at(0).at("message").at("content");
 
-            std::string content = gptResponse.at("choices").at(0).at("message").at("content");
+                nlohmann::json evaluations = nlohmann::json::parse(content);
 
-            nlohmann::json evaluations = nlohmann::json::parse(content);
-
-            for (auto& ev : evaluations.at("evaluations")) {
-                std::cout << "Id :" << ev["id"] << ", Ticker: " << ev["ticker"] << ", Confidence: " << ev["confidence"] << "\n";
+                for (auto& ev : evaluations.at("evaluations")) {
+                    std::cout << "Id :" << ev["id"] << ", Ticker: " << ev["ticker"] << ", Confidence: " << ev["confidence"] << "\n";
+                }
+            }
+            catch (const std::exception& e) {
+                std::cerr << "Bad GPT reply, skipping: " << e.what() << "\n";
             }
         }
-        catch (const std::exception& e) {
-            std::cerr << "Bad GPT reply, skipping: " << e.what() << "\n";
-        }
+
+        // Remember which comments are done (scores were saved by evaluate).
+        reddit.saveState();
 
         if(mktOpen) trigger.store(true);
 
@@ -137,6 +140,17 @@ bool contains(const year_month_day (&days)[N], const year_month_day& d)
 
 } // namespace
 
+std::string Engine::todayInNewYork()
+{
+    zoned_time ny{ "America/New_York", system_clock::now() };
+    year_month_day d{ floor<days>(ny.get_local_time()) };
+
+    char buf[11];
+    std::snprintf(buf, sizeof(buf), "%04d-%02u-%02u",
+        static_cast<int>(d.year()), static_cast<unsigned>(d.month()), static_cast<unsigned>(d.day()));
+    return buf;
+}
+
 bool Engine::canTradeNow()
 {
     // Work in New York time so US daylight saving and the machine's own
@@ -166,15 +180,17 @@ bool Engine::canTradeNow()
     return timeOfDay >= kTradeStart && timeOfDay < end;
 }
 
+// Called right after orders are placed. Update and save the scores straight
+// away, so a restart can't place the same orders a second time.
 void Engine::notifyTradeCycleComplete()
 {
-    tradeCycleComplete.store(true, std::memory_order_release);
+    gpt.updateTickerConfidenceMap();
 }
-
 
 void Engine::notifyRebalanceMap()
 {
-    rebalance.store(true, std::memory_order_release);   
+    gpt.rebalanceTickerConfidenceMap();
+    state.set("lastMarketOpen", todayInNewYork());
 }
 
 void Engine::setClient(MyEWrapper& c)

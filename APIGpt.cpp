@@ -1,7 +1,10 @@
 #include "APIGpt.h"
 
+#include <cmath>
 
-APIGpt::APIGpt()
+
+APIGpt::APIGpt(StateStore& s)
+    : state(s)
 {
     body = {
         {"model", "gpt-4o-mini"},
@@ -10,6 +13,19 @@ APIGpt::APIGpt()
             {{"role", "user"},   {"content", ""}}
         }}
     };
+
+    nlohmann::json saved = state.get("confidence");
+    if (saved.is_object()) {
+        for (auto& [ticker, value] : saved.items())
+            if (value.is_number()) tickerConfidenceMap[ticker] = value.get<double>();
+        std::cout << "Loaded scores for " << tickerConfidenceMap.size() << " tickers\n";
+    }
+}
+
+// Call with mapMutex held.
+void APIGpt::saveLocked()
+{
+    state.set("confidence", tickerConfidenceMap);
 }
 
 nlohmann::json APIGpt::evaluate(const std::string& feed)
@@ -97,10 +113,12 @@ void APIGpt::loadTickerConfidenceMap(nlohmann::json content)
         std::string ticker = ev["ticker"];
         double confidence = ev["confidence"];
 
-        confidence *= abs(confidence);
+        confidence *= std::abs(confidence);
 
         tickerConfidenceMap[ticker] -= confidence;
 	}
+
+    saveLocked();
 }
 
 void APIGpt::updateTickerConfidenceMap()
@@ -112,6 +130,8 @@ void APIGpt::updateTickerConfidenceMap()
         int qt = static_cast<int>(instruction);
         instruction -= qt;
     }
+
+    saveLocked();
 }
  
 std::unordered_map<std::string, double> APIGpt::snapshot()
@@ -129,4 +149,6 @@ void APIGpt::rebalanceTickerConfidenceMap()
     {
         instruction /= 3;
     }
+
+    saveLocked();
 }

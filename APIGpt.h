@@ -7,10 +7,12 @@
 #include <unordered_map>
 #include <mutex>
 
+#include "State.h"
+
 class APIGpt {
 
 public:
-    APIGpt();
+    explicit APIGpt(StateStore& s);
 	nlohmann::json evaluate(const std::string& feed);
     void updateTickerConfidenceMap();
     void rebalanceTickerConfidenceMap();
@@ -18,11 +20,13 @@ public:
 
 private:
 	void loadTickerConfidenceMap(nlohmann::json content);
+    void saveLocked();
 
 private:
 	std::unordered_map<std::string, double> tickerConfidenceMap;
     std::mutex mapMutex;
     nlohmann::json body;
+    StateStore& state;
 
 	const std::string api_key = std::getenv("GPT_KEY");
 	const std::string gptRole = R"(You are an evaluator of trading intent in Reddit comments/posts. Return ONLY valid JSON. All strings MUST use double quotes.
