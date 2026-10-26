@@ -65,7 +65,11 @@ bool APIReddit::fetch(std::string what)
 
         std::time_t created = static_cast<std::time_t>(fdata["created_utc"].get<double>());
 
-        if (created >= cutoff) {
+        // Skip comments already sent on a previous fetch.
+        const std::string name = fdata.value("name", "");
+        bool isNew = name.empty() || seen.emplace(name, created).second;
+
+        if (created >= cutoff && isNew) {
             nlohmann::json dataObj;
             
             dataObj["id"] = cnt++;
@@ -82,6 +86,10 @@ bool APIReddit::fetch(std::string what)
             dataArray.push_back(dataObj);
         }
     }
+
+    // Forget comments older than the cutoff; they can't come back anyway.
+    for (auto it = seen.begin(); it != seen.end(); )
+        it = (it->second < cutoff) ? seen.erase(it) : std::next(it);
 
     nlohmann::json finalPayload;
     finalPayload["data"] = dataArray;

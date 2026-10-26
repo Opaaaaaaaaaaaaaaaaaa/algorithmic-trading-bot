@@ -5,6 +5,9 @@
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <chrono>
+#include <ctime>
+#include <string>
+#include <unordered_map>
 
 
 class APIReddit {
@@ -20,6 +23,7 @@ private:
 
 private:
     nlohmann::json latestPayload;
+    std::unordered_map<std::string, std::time_t> seen; // Reddit id -> created time
     int cutofftime;
     std::chrono::system_clock::time_point tokenExpiry;
 
