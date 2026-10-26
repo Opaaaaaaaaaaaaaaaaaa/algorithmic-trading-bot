@@ -40,7 +40,8 @@ nlohmann::json APIGpt::evaluate(const std::string& feed)
             {"Authorization", "Bearer " + api_key},
             {"Content-Type", "application/json"}
         },
-        cpr::Body{ body.dump() }
+        cpr::Body{ body.dump() },
+        cpr::Timeout{ 120000 }
     );
 
     if (r.error) {

@@ -27,6 +27,9 @@
     <ClCompile Include="APIGpt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Alerts.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="APIPrice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -51,6 +54,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="APIGpt.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Alerts.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="APIPrice.h">

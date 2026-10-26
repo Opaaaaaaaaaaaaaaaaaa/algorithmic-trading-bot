@@ -10,7 +10,8 @@ void APITelegram::sendMessage(std::string s)
         cpr::Payload{
             {"chat_id", chatid},
             {"text", s}
-        }
+        },
+        cpr::Timeout{ 10000 }
     );
 
     std::cout << "Status: " << response.status_code << std::endl;

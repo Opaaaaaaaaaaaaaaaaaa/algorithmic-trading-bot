@@ -1,4 +1,5 @@
 #include "APIPrice.h"
+#include "Alerts.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -35,6 +36,11 @@ std::optional<double> APIPrice::get(const std::string& ticker)
     bool unknownSymbol = false;
     std::optional<double> price = fetch(ticker, unknownSymbol);
 
+    if (alerts && hasKey()) {
+        if (price || unknownSymbol) alerts->ok("Price lookups");
+        else alerts->fail("Price lookups", "Finnhub isn't returning prices (" + lastError + "), so no trades", minutes(5));
+    }
+
     if (price || unknownSymbol) {
         cache[ticker] = { price, now };
         if (unknownSymbol) std::cout << "No price for " << ticker << " (unknown symbol), skipping it\n";
@@ -59,6 +65,7 @@ std::optional<double> APIPrice::fetch(const std::string& ticker, bool& unknownSy
     );
 
     if (r.status_code != 200) {
+        lastError = r.status_code == 0 ? "no response" : "HTTP " + std::to_string(r.status_code);
         std::cerr << "Price lookup for " << ticker << " failed: HTTP " << r.status_code << "\n";
         return std::nullopt;
     }
@@ -70,9 +77,12 @@ std::optional<double> APIPrice::fetch(const std::string& ticker, bool& unknownSy
             double c = j["c"].get<double>();
             if (c > 0) return c;
             unknownSymbol = true;
+            return std::nullopt;
         }
+        lastError = "unexpected reply";
     }
     catch (const std::exception& e) {
+        lastError = "bad reply";
         std::cerr << "Price lookup for " << ticker << " returned bad JSON: " << e.what() << "\n";
     }
     return std::nullopt;

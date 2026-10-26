@@ -5,6 +5,8 @@
 #include <string>
 #include <unordered_map>
 
+class Alerts;
+
 // Looks up current stock prices from Finnhub (finnhub.io) over HTTP.
 // Needs FINNHUB_KEY in .env.
 class APIPrice {
@@ -15,6 +17,9 @@ public:
     // Unknown symbols (e.g. made-up tickers) also return nothing.
     std::optional<double> get(const std::string& ticker);
 
+    void setAlerts(Alerts& a) { alerts = &a; }
+    bool hasKey() const { return !key.empty(); }
+
 private:
     struct Entry {
         std::optional<double> price;   // empty = Finnhub doesn't know this symbol
@@ -24,5 +29,7 @@ private:
     std::optional<double> fetch(const std::string& ticker, bool& unknownSymbol);
 
     std::string key;
+    std::string lastError;
+    Alerts* alerts = nullptr;
     std::unordered_map<std::string, Entry> cache;
 };

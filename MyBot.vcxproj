@@ -127,6 +127,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Alerts.cpp" />
     <ClCompile Include="APIGpt.cpp" />
     <ClCompile Include="APIPrice.cpp" />
     <ClCompile Include="APIReddit.cpp" />
@@ -138,6 +139,7 @@
     <ClCompile Include="State.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Alerts.h" />
     <ClInclude Include="APIGpt.h" />
     <ClInclude Include="APIPrice.h" />
     <ClInclude Include="APIReddit.h" />

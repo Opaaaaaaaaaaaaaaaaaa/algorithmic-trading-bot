@@ -45,7 +45,8 @@ void APIReddit::init()
             {"grant_type", "password"},
             {"username", username},
             {"password", password}
-        }
+        },
+        cpr::Timeout{ 30000 }
     );
 
     nlohmann::json token_json = nlohmann::json::parse(token_res.text);
@@ -86,7 +87,8 @@ bool APIReddit::fetch(std::string what)
                 {"Authorization", "bearer " + token},
                 {"User-Agent", user_agent}
             },
-            params
+            params,
+            cpr::Timeout{ 30000 }
         );
         ++requests;
 

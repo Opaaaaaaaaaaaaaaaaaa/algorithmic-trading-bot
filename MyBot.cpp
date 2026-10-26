@@ -15,6 +15,7 @@
 #include "Engine.h"
 #include "State.h"
 #include "APIPrice.h"
+#include "Alerts.h"
 
 #include <iostream>
 #include <cpr/cpr.h>
@@ -40,11 +41,17 @@ int main(int argc, char** argv)
 	std::atomic<bool> trigger = false;
 	std::atomic<bool> open = false;
 	std::atomic<bool> wait = false;
+	Alerts alerts;
+	alerts.now("MyBot started");
+
 	StateStore state("bot_state.json");
 	APIGpt chatGpt(state);
 	APIReddit reddit(state);
 	APIPrice prices;
-	Engine engine(chatGpt, reddit, trigger, open, wait, state);
+	prices.setAlerts(alerts);
+	if (!prices.hasKey())
+		alerts.now("[ALERT] FINNHUB_KEY is missing from .env, so the bot can't place any orders");
+	Engine engine(chatGpt, reddit, trigger, open, wait, state, alerts);
 	std::thread engineThread(&Engine::run, &engine);
 
 	for (;;) {
@@ -55,6 +62,7 @@ int main(int argc, char** argv)
 		client.setEngine(engine);
 		client.setGpt(chatGpt);
 		client.setPrices(prices);
+		client.setAlerts(alerts);
 		if (connectOptions) {
 			client.setConnectOptions(connectOptions);
 		}
@@ -62,6 +70,7 @@ int main(int argc, char** argv)
 		engine.setClient(client);
 
 		client.connect(host, port, clientId);
+		if (client.isConnected()) alerts.ok("IBKR connection");
 
 		while (client.isConnected()) {
 
@@ -76,6 +85,8 @@ int main(int argc, char** argv)
 			{
 				client.waitMktOpen();
 				wait.store(false);
+				trigger.store(false);  // market closed: drop any pending trade round
+				alerts.ok("Trading");
 			}
 
 			if (trigger)
@@ -83,11 +94,28 @@ int main(int argc, char** argv)
 				if (client.triggerTrades())
 				{
 					trigger.store(false);
+					alerts.ok("Trading");
+				}
+				else
+				{
+					alerts.fail("Trading", "the market is open but orders can't be sent (stuck waiting on IBKR)",
+						std::chrono::minutes(5));
 				}
 			}
+
+			long long stuck = engine.minutesSinceLastLoop();
+			if (stuck >= 10)
+				alerts.fail("Engine", "the main loop hasn't run for " + std::to_string(stuck) +
+					" min (stuck on Reddit or GPT?)", std::chrono::seconds(0));
+			else
+				alerts.ok("Engine");
+
+			alerts.tick();
 		}
 
 		engine.clearClient();
+		alerts.fail("IBKR connection", "can't connect to TWS / IB Gateway (is it running and logged in?)",
+			std::chrono::minutes(2));
 
 		if (attempt >= MAX_ATTEMPTS) {
 			std::this_thread::sleep_for(std::chrono::minutes(SLEEP_TIME));

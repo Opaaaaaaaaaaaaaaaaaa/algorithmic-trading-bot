@@ -98,12 +98,26 @@ void MyEWrapper::error(int id, time_t errorTime, int errorCode, const std::strin
 
 	if (!advancedOrderRejectJson.empty()) {
 		printf("Error. Id: %d, Time: %s, Code: %d, Msg: %s, AdvancedOrderRejectJson: %s\n", id, errorTimeStr, errorCode, errorString.c_str(), advancedOrderRejectJson.c_str());
-		telegram.sendMessage(errorString.c_str());
-		telegram.sendMessage(advancedOrderRejectJson.c_str());
 	}
 	else {
 		printf("Error. Id: %d, Time: %s, Code: %d, Msg: %s\n", id, errorTimeStr, errorCode, errorString.c_str());
 	}
+
+	if (!alerts) return;
+
+	// A message about one of our orders. Codes 399 and 2100-2999 are only warnings.
+	auto order = m_orderInfo.find(id);
+	bool warningOnly = errorCode == 399 || (errorCode >= 2100 && errorCode < 3000);
+	if (order != m_orderInfo.end() && !warningOnly) {
+		alerts->now("[ALERT] IBKR rejected order " + order->second + ": " + errorString +
+			" (code " + std::to_string(errorCode) + ")");
+	}
+
+	// TWS lost / regained its own connection to IBKR's servers.
+	if (errorCode == 1100)
+		alerts->fail("IBKR server connection", "TWS lost its connection to IBKR's servers", std::chrono::minutes(3));
+	if (errorCode == 1101 || errorCode == 1102)
+		alerts->ok("IBKR server connection");
 }
 
 void MyEWrapper::nextValidId(OrderId orderId)
@@ -163,6 +177,25 @@ void MyEWrapper::setPrices(APIPrice& p)
 	prices = &p;
 }
 
+void MyEWrapper::setAlerts(Alerts& a)
+{
+	alerts = &a;
+}
+
+void MyEWrapper::placeAndRemember(const Contract& contr, const Order& o, int shares)
+{
+	m_orderInfo[m_orderId] = o.action + " " + std::to_string(shares) + " " + contr.symbol;
+	m_pClient->placeOrder(m_orderId++, contr, o);
+}
+
+// IBKR reports each (partial) fill here. Collected for the hourly Telegram summary.
+void MyEWrapper::execDetails(int reqId, const Contract& contract, const Execution& execution)
+{
+	double shares = std::stod(DecimalFunctions::decimalToString(execution.shares));
+	printf("Filled: %s %g %s @ $%.2f\n", execution.side.c_str(), shares, contract.symbol.c_str(), execution.price);
+	if (alerts) alerts->addFill(execution.orderId, contract.symbol, execution.side, shares, execution.price);
+}
+
 void MyEWrapper::executeTrades()
 {
 	std::unordered_map<std::string, double> localCopy = gpt->snapshot();
@@ -193,7 +226,7 @@ void MyEWrapper::executeTrades()
 		o.tif = "DAY";
 		o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(shares));
 
-		m_pClient->placeOrder(m_orderId++, contr, o);
+		placeAndRemember(contr, o, shares);
 
 		// Only the dollars actually traded come off the score; the rest carries over.
 		double used = shares * *price / kDollarsPerPoint;
@@ -203,7 +236,6 @@ void MyEWrapper::executeTrades()
 		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)",
 			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price);
 		printf("%s\n", msg);
-		telegram.sendMessage(msg);
 	}
 
 	m_state = ST_TRADE_ACK;
@@ -256,9 +288,9 @@ void MyEWrapper::rebalance()
 
 		o.action = (pos > 0) ? "SELL" : "BUY";
 
-		m_pClient->placeOrder(m_orderId++, contr, o);
+		placeAndRemember(contr, o, half);
 
-		telegram.sendMessage("Order placed: Ticker " + symbol + " Amount " + std::to_string(half));
+		printf("Rebalance order placed: %s %d %s\n", o.action.c_str(), half, symbol.c_str());
 	}
 
 	engine->notifyRebalanceMap();

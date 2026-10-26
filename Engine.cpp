@@ -7,7 +7,7 @@
 
 const size_t kGptBatchSize = 100;
 
-Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s)
+Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s, Alerts& a)
     : gpt(g)
     , reddit(r)
     , flag(true)
@@ -16,6 +16,7 @@ Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>&
     , wait(w)
     , client(nullptr)
     , state(s)
+    , alerts(a)
 {
     // Only skip the market-open steps (positions + rebalance) if they already
     // ran today. After a restart before they ran, they run on the first loop.
@@ -46,7 +47,18 @@ void Engine::run()
             }
         }
 
-        reddit.fetchComments();
+        lastLoop.store(std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+
+        bool fetched = false;
+        try {
+            fetched = reddit.fetchComments();
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Reddit fetch crashed: " << e.what() << "\n";
+        }
+        if (fetched) alerts.ok("Reddit");
+        else alerts.fail("Reddit", "can't fetch comments from Reddit", std::chrono::minutes(5));
 
         nlohmann::json commentsPayload = reddit.getLatestPayload();
 
@@ -70,6 +82,7 @@ void Engine::run()
                 std::string content = gptResponse.at("choices").at(0).at("message").at("content");
 
                 nlohmann::json evaluations = nlohmann::json::parse(content);
+                alerts.ok("GPT");
 
                 for (auto& ev : evaluations.at("evaluations")) {
                     std::cout << "Id :" << ev["id"] << ", Ticker: " << ev["ticker"] << ", Confidence: " << ev["confidence"] << "\n";
@@ -77,6 +90,8 @@ void Engine::run()
             }
             catch (const std::exception& e) {
                 std::cerr << "Bad GPT reply, skipping: " << e.what() << "\n";
+                alerts.fail("GPT", "OpenAI calls are failing (out of credits, bad key or bad replies, see the bot window)",
+                    std::chrono::minutes(5));
             }
         }
 
@@ -84,6 +99,8 @@ void Engine::run()
         reddit.saveState();
 
         if(mktOpen) trigger.store(true);
+
+        alerts.tick();
 
         std::this_thread::sleep_for(std::chrono::minutes(1));
     }
@@ -189,6 +206,15 @@ void Engine::notifyRebalanceMap()
 {
     gpt.rebalanceTickerConfidenceMap();
     state.set("lastMarketOpen", todayInNewYork());
+}
+
+long long Engine::minutesSinceLastLoop() const
+{
+    long long last = lastLoop.load();
+    if (last == 0) return 0;  // hasn't started yet
+    long long now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    return (now - last) / 60;
 }
 
 void Engine::setClient(MyEWrapper& c)

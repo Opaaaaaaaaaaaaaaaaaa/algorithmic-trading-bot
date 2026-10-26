@@ -7,6 +7,7 @@
 #include "APIGpt.h"
 #include "APITelegram.h"
 #include "APIPrice.h"
+#include "Alerts.h"
 
 #include <memory>
 #include <vector>
@@ -44,12 +45,14 @@ public:
 	void error(int id, time_t errorTime, int errorCode, const std::string& errorString, const std::string& advancedOrderRejectJson);
 	void position(const std::string& account, const Contract& contract, Decimal position, double avgCost);
 	void positionEnd();
+	void execDetails(int reqId, const Contract& contract, const Execution& execution) override;
 
 public:
 	void myTest();
 	void setEngine(Engine& e);
 	void setGpt(APIGpt& g);
 	void setPrices(APIPrice& p);
+	void setAlerts(Alerts& a);
 	void executeTrades();
 	void waitMktOpen();
 	void mktOpen();
@@ -60,9 +63,12 @@ public:
 
 private:
 	Engine* engine;
-	APITelegram telegram;
 	APIGpt* gpt;
 	APIPrice* prices = nullptr;
+	Alerts* alerts = nullptr;
+	std::unordered_map<long, std::string> m_orderInfo;  // order id -> "SELL 3 NU", for alerts
+
+	void placeAndRemember(const Contract& contr, const Order& o, int shares);
 	std::unordered_map<std::string, double> m_rebalanceMap;
 
 	EReaderOSSignal m_osSignal;
