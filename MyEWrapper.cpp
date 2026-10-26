@@ -154,8 +154,6 @@ void MyEWrapper::setGpt(APIGpt& g)
 
 void MyEWrapper::executeTrades()
 {
-	printf("In execute trades\n");
-
 	std::unordered_map<std::string, double> localCopy = gpt->snapshot();
 
 	for (auto& [ticker, instruction] : localCopy)
@@ -173,7 +171,6 @@ void MyEWrapper::executeTrades()
 
 		int qt = static_cast<int>(instruction);
 		int amount = abs(qt);
-		if (amount == 0) continue;
 
 		o.orderType = "MKT";
 		o.tif = "DAY";

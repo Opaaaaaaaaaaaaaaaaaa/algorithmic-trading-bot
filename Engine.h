@@ -8,7 +8,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-//#include "MyEWrapper.h"
 
 class MyEWrapper;
 
@@ -16,7 +15,6 @@ class Engine {
 public: 
 	Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s);
 	void run();
-	void setFlag(bool f);
 	void notifyTradeCycleComplete();
 	void notifyRebalanceMap();
 	void setClient(MyEWrapper& c);
