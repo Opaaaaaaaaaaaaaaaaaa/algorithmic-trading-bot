@@ -130,9 +130,10 @@ constexpr year_month_day kNyseEarlyCloses[] = {
 
 constexpr year kLastListedYear = 2027y;
 
-constexpr minutes kTradeStart = 9h + 28min;
-constexpr minutes kTradeEnd = 15h + 58min;
-constexpr minutes kTradeEndEarlyClose = 12h + 58min;
+// Regular NYSE session, New York time: open 9:30, close 16:00 (13:00 on early-close days).
+constexpr minutes kTradeStart = 9h + 30min;
+constexpr minutes kTradeEnd = 16h;
+constexpr minutes kTradeEndEarlyClose = 13h;
 
 template <size_t N>
 bool contains(const year_month_day (&days)[N], const year_month_day& d)
