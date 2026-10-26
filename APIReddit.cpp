@@ -58,6 +58,14 @@ bool APIReddit::fetch(std::string what)
 
     auto children = feed["data"]["children"];
 
+    if (children.size() > 1) {
+        double newest = children.front()["data"]["created_utc"].get<double>();
+        double oldest = children.back()["data"]["created_utc"].get<double>();
+        double mins = (newest - oldest) / 60.0;
+        if (mins > 0)
+            std::cout << "WSB rate: ~" << (children.size() / mins) << " comments/min\n";
+    }
+
 	int cnt = 0;
 
     for (const auto& child : children) {
