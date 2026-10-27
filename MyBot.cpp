@@ -16,6 +16,7 @@
 #include "State.h"
 #include "APIPrice.h"
 #include "Alerts.h"
+#include "Log.h"
 
 #include <iostream>
 #include <cpr/cpr.h>
@@ -36,7 +37,8 @@ int main(int argc, char** argv)
 	int clientId = 0;
 
 	unsigned attempt = 0;
-	printf("Start\n");
+	startLogging("logs");
+	logPrintf("Start\n");
 
 	std::atomic<bool> trigger = false;
 	std::atomic<bool> open = false;
@@ -57,7 +59,7 @@ int main(int argc, char** argv)
 
 	for (;;) {
 		++attempt;
-		printf("Attempt %u of %u\n", attempt, MAX_ATTEMPTS);
+		logPrintf("Attempt %u of %u\n", attempt, MAX_ATTEMPTS);
 
 		MyEWrapper client;
 		client.setEngine(engine);
@@ -125,9 +127,9 @@ int main(int argc, char** argv)
 			attempt = 0;
 		}
 
-		printf("Sleeping %u seconds before next attempt\n", SLEEP_TIME);
+		logPrintf("Sleeping %u seconds before next attempt\n", SLEEP_TIME);
 		std::this_thread::sleep_for(std::chrono::seconds(SLEEP_TIME));
 	}
 
-	printf("End\n");
+	logPrintf("End\n");
 }
