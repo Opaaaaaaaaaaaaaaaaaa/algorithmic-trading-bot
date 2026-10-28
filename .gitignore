@@ -27,3 +27,6 @@ CMakeCache.txt
 bot_state.json
 bot_state.json.tmp
 bot_state.json.bad
+
+# Console logs
+logs/

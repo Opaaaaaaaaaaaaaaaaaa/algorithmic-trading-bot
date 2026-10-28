@@ -137,6 +137,7 @@
     <ClCompile Include="MyBot.cpp" />
     <ClCompile Include="MyEWrapper.cpp" />
     <ClCompile Include="State.cpp" />
+    <ClCompile Include="Log.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Alerts.h" />
@@ -148,6 +149,7 @@
     <ClInclude Include="Env.h" />
     <ClInclude Include="MyEWrapper.h" />
     <ClInclude Include="State.h" />
+    <ClInclude Include="Log.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\source\cppclient\client\TwsSocketClientStatic.vcxproj">

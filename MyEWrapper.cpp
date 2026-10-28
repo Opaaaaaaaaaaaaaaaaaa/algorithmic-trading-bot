@@ -2,6 +2,7 @@
 
 #include "MyEWrapper.h"
 #include "Engine.h"
+#include "Log.h"
 
 #include "EClientSocket.h"
 #include "EPosixClientSocketPlatform.h"
@@ -52,18 +53,18 @@ MyEWrapper::~MyEWrapper()
 
 bool MyEWrapper::connect( const char* host, int port, int clientId)
 {
-	printf("Connecting to %s:%d clientId:%d\n", !(host && *host) ? "127.0.0.1" : host, port, clientId);
+	logPrintf("Connecting to %s:%d clientId:%d\n", !(host && *host) ? "127.0.0.1" : host, port, clientId);
 
 	bool bRes = m_pClient->eConnect(host, port, clientId, m_extraAuth);
 
 	if (bRes) {
-		printf("Connected to %s:%d clientId:%d serverVersion: %d\n", m_pClient->host().c_str(), m_pClient->port(), clientId, m_pClient->EClient::serverVersion());
+		logPrintf("Connected to %s:%d clientId:%d serverVersion: %d\n", m_pClient->host().c_str(), m_pClient->port(), clientId, m_pClient->EClient::serverVersion());
 
 		m_pReader = std::unique_ptr<EReader>(new EReader(m_pClient, &m_osSignal));
 		m_pReader->start();
 	}
 	else
-		printf("Cannot connect to %s:%d clientId:%d\n", m_pClient->host().c_str(), m_pClient->port(), clientId);
+		logPrintf("Cannot connect to %s:%d clientId:%d\n", m_pClient->host().c_str(), m_pClient->port(), clientId);
 
 	return bRes;
 }
@@ -72,7 +73,7 @@ void MyEWrapper::disconnect() const
 {
 	m_pClient->eDisconnect();
 
-	printf("Disconnected\n");
+	logPrintf("Disconnected\n");
 }
 
 bool MyEWrapper::isConnected() const
@@ -101,10 +102,10 @@ void MyEWrapper::error(int id, time_t errorTime, int errorCode, const std::strin
 	}
 
 	if (!advancedOrderRejectJson.empty()) {
-		printf("Error. Id: %d, Time: %s, Code: %d, Msg: %s, AdvancedOrderRejectJson: %s\n", id, errorTimeStr, errorCode, errorString.c_str(), advancedOrderRejectJson.c_str());
+		logPrintf("Error. Id: %d, Time: %s, Code: %d, Msg: %s, AdvancedOrderRejectJson: %s\n", id, errorTimeStr, errorCode, errorString.c_str(), advancedOrderRejectJson.c_str());
 	}
 	else {
-		printf("Error. Id: %d, Time: %s, Code: %d, Msg: %s\n", id, errorTimeStr, errorCode, errorString.c_str());
+		logPrintf("Error. Id: %d, Time: %s, Code: %d, Msg: %s\n", id, errorTimeStr, errorCode, errorString.c_str());
 	}
 
 	if (!alerts) return;
@@ -131,7 +132,7 @@ void MyEWrapper::error(int id, time_t errorTime, int errorCode, const std::strin
 
 void MyEWrapper::nextValidId(OrderId orderId)
 {
-	printf("MyEWrapper::nextValidId. Next Valid Id: %ld\n", orderId);
+	logPrintf("MyEWrapper::nextValidId. Next Valid Id: %ld\n", orderId);
 	m_orderId = orderId;
 	m_state = ST_CONNECT_ACK;
 }
@@ -267,7 +268,7 @@ void MyEWrapper::endOrder(long orderId, const std::string& why, bool rejected)
 
 	if (rejected) book->retryAfter[t.symbol] = std::chrono::steady_clock::now() + kRetryAfterReject;
 
-	printf("Order ended: %s\n", msg.c_str());
+	logPrintf("Order ended: %s\n", msg.c_str());
 	// Keyed per ticker: repeated rejections of the same ticker alert only once,
 	// and you get an [OK] once an order for it fills again.
 	if (alerts) alerts->fail("Orders for " + t.symbol, msg, std::chrono::seconds(0));
@@ -291,7 +292,7 @@ void MyEWrapper::checkOrders()
 void MyEWrapper::execDetails(int reqId, const Contract& contract, const Execution& execution)
 {
 	double shares = std::stod(DecimalFunctions::decimalToString(execution.shares));
-	printf("Filled: %s %g %s @ $%.2f\n", execution.side.c_str(), shares, contract.symbol.c_str(), execution.price);
+	logPrintf("Filled: %s %g %s @ $%.2f\n", execution.side.c_str(), shares, contract.symbol.c_str(), execution.price);
 	if (alerts) alerts->addFill(execution.orderId, contract.symbol, execution.side, shares, execution.price);
 }
 
@@ -342,7 +343,7 @@ void MyEWrapper::executeTrades()
 		char msg[200];
 		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)",
 			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price);
-		printf("%s\n", msg);
+		logPrintf("%s\n", msg);
 	}
 
 	m_state = ST_TRADE_ACK;
@@ -354,7 +355,7 @@ bool MyEWrapper::triggerTrades()
 
 	m_state = ST_TRADE;
 
-	printf("In trigger trades\n");
+	logPrintf("In trigger trades\n");
 	return true;
 }
 
@@ -404,7 +405,7 @@ void MyEWrapper::rebalance()
 
 		placeAndRemember(contr, o, half, 0.0);
 
-		printf("Rebalance order placed: %s %d %s\n", o.action.c_str(), half, symbol.c_str());
+		logPrintf("Rebalance order placed: %s %d %s\n", o.action.c_str(), half, symbol.c_str());
 	}
 
 	engine->notifyRebalanceMap();
