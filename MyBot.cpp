@@ -115,6 +115,7 @@ int main(int argc, char** argv)
 				alerts.ok("Engine");
 
 			client.checkOrders();
+			client.reportTick();
 			alerts.tick();
 		}
 

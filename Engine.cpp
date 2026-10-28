@@ -84,6 +84,11 @@ void Engine::run()
 
                 for (auto& ev : evaluations.at("evaluations")) {
                     std::cout << "Id :" << ev["id"] << ", Ticker: " << ev["ticker"] << ", Confidence: " << ev["confidence"] << "\n";
+                    if (ev.contains("confidence") && ev["confidence"].is_number()) {
+                        std::lock_guard<std::mutex> lock(statsMutex);
+                        hourStats.add(ev["confidence"].get<double>());
+                        dayStats.add(ev["confidence"].get<double>());
+                    }
                 }
             }
             catch (const std::exception& e) {
@@ -95,6 +100,13 @@ void Engine::run()
 
 
         reddit.saveState();
+
+        if (std::chrono::steady_clock::now() - lastHourLog >= std::chrono::hours(1)) {
+            lastHourLog = std::chrono::steady_clock::now();
+            std::lock_guard<std::mutex> lock(statsMutex);
+            std::cout << "Last hour GPT: " << hourStats.describe() << "\n";
+            hourStats = Sentiment();
+        }
 
         if(mktOpen) trigger.store(true);
 
@@ -145,8 +157,9 @@ constexpr year_month_day kNyseEarlyCloses[] = {
 
 constexpr year kLastListedYear = 2027y;
 
-// Regular NYSE session, New York time: open 9:30, close 16:00 (13:00 on early-close days).
-constexpr minutes kTradeStart = 9h + 30min;
+// The bot trades from 9:40, 10 minutes after the 9:30 open when spreads have settled,
+// until the close at 16:00 (13:00 on early-close days), New York time.
+constexpr minutes kTradeStart = 9h + 40min;
 constexpr minutes kTradeEnd = 16h;
 constexpr minutes kTradeEndEarlyClose = 13h;
 
@@ -204,6 +217,31 @@ void Engine::notifyRebalanceMap()
 {
     gpt.rebalanceTickerConfidenceMap();
     state.set("lastMarketOpen", todayInNewYork());
+}
+
+void Sentiment::add(double confidence)
+{
+    if (confidence > 0) { ++bullish; bullishWeight += confidence * confidence; }
+    if (confidence < 0) { ++bearish; bearishWeight += confidence * confidence; }
+}
+
+std::string Sentiment::describe() const
+{
+    int total = bullish + bearish;
+    if (total == 0) return "no calls";
+    double weight = bullishWeight + bearishWeight;
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%d bullish / %d bearish calls (%.0f%% bullish, %.0f%% by score)",
+        bullish, bearish, 100.0 * bullish / total, weight > 0 ? 100.0 * bullishWeight / weight : 0.0);
+    return buf;
+}
+
+Sentiment Engine::takeDayStats()
+{
+    std::lock_guard<std::mutex> lock(statsMutex);
+    Sentiment s = dayStats;
+    dayStats = Sentiment();
+    return s;
 }
 
 long long Engine::minutesSinceLastLoop() const

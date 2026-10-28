@@ -11,6 +11,7 @@
 #include "Order.h"
 #include "Execution.h"
 #include "Decimal.h"
+#include "TagValue.h"
 
 #include <stdio.h>
 #include <chrono>
@@ -22,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <optional>
+#include <algorithm>
 
 
 const double kDollarsPerPoint = 500.0;
@@ -30,6 +32,26 @@ const auto kSlowFill = std::chrono::minutes(5);
 // After IBKR rejects an order for a ticker, wait this long before trying that ticker again.
 const auto kRetryAfterReject = std::chrono::minutes(15);
 
+
+// Request id for IBKR's account summary (kept far away from order ids).
+const int kAccountSummaryReqId = 2000000001;
+const auto kPositionsLogEvery = std::chrono::hours(1);
+// Send the daily summary without positions if TWS hasn't answered by then.
+const auto kSummaryTimeout = std::chrono::minutes(2);
+
+// Market order worked by IBKR's Adaptive algo, which tries to fill inside the spread.
+static Order adaptiveMarketOrder(const std::string& action, int shares)
+{
+	Order o;
+	o.action = action;
+	o.orderType = "MKT";
+	o.tif = "DAY";
+	o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(shares));
+	o.algoStrategy = "Adaptive";
+	o.algoParams.reset(new TagValueList());
+	o.algoParams->push_back(TagValueSPtr(new TagValue("adaptivePriority", "Normal")));
+	return o;
+}
 
 const int PING_DEADLINE = 2;
 const int SLEEP_BETWEEN_PINGS = 30; 
@@ -328,11 +350,7 @@ void MyEWrapper::executeTrades()
 		contr.exchange = "SMART";
 		contr.currency = "USD";
 
-		Order o;
-		o.action = score > 0 ? "BUY" : "SELL";
-		o.orderType = "MKT";
-		o.tif = "DAY";
-		o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(shares));
+		Order o = adaptiveMarketOrder(score > 0 ? "BUY" : "SELL", shares);
 
 		placeAndRemember(contr, o, shares, *price / kDollarsPerPoint);
 
@@ -369,6 +387,89 @@ void MyEWrapper::waitMktOpen()
 		for (auto& [id, t] : book->orders) open.push_back(id);
 		for (long id : open) endOrder(id, "not filled by the market close", false);
 	}
+
+	requestAccountSummary(true);
+}
+
+void MyEWrapper::requestAccountSummary(bool forDailySummary)
+{
+	if (forDailySummary) m_dailyPending = true;
+	if (m_summaryPending) return;
+	m_summaryPending = true;
+	m_summaryAsked = std::chrono::steady_clock::now();
+	m_summaryValues.clear();
+	m_summaryCurrency.clear();
+	m_pClient->reqAccountSummary(kAccountSummaryReqId, "All", "NetLiquidation,TotalCashValue,GrossPositionValue");
+}
+
+void MyEWrapper::accountSummary(int reqId, const std::string&, const std::string& tag,
+	const std::string& value, const std::string& currency)
+{
+	if (reqId != kAccountSummaryReqId) return;
+	try {
+		m_summaryValues[tag] += std::stod(value);
+		if (!currency.empty()) m_summaryCurrency = currency;
+	}
+	catch (const std::exception&) {}
+}
+
+// Net position value = net liquidation - cash, because short sale money sits in cash.
+// Long and short then follow from the gross (long + |short|) value.
+void MyEWrapper::accountSummaryEnd(int reqId)
+{
+	if (reqId != kAccountSummaryReqId) return;
+	m_pClient->cancelAccountSummary(kAccountSummaryReqId);
+	m_summaryPending = false;
+
+	double net = m_summaryValues["NetLiquidation"] - m_summaryValues["TotalCashValue"];
+	double gross = m_summaryValues["GrossPositionValue"];
+	std::string line = "Positions: long " + dollars((gross + net) / 2) + ", short " + dollars((gross - net) / 2) +
+		", net " + dollars(net);
+	if (!m_summaryCurrency.empty()) line += " (" + m_summaryCurrency + ")";
+	logPrintf("%s\n", line.c_str());
+
+	if (m_dailyPending) sendDailySummary(line);
+}
+
+void MyEWrapper::reportTick()
+{
+	if (m_state == ST_CONNECT) return;  // not connected to TWS yet
+	auto now = std::chrono::steady_clock::now();
+
+	if (m_summaryPending && now - m_summaryAsked >= kSummaryTimeout) {
+		m_pClient->cancelAccountSummary(kAccountSummaryReqId);
+		m_summaryPending = false;
+		if (m_dailyPending) sendDailySummary("Positions: TWS didn't send them");
+	}
+
+	if (m_lastPositionsLog == std::chrono::steady_clock::time_point{} || now - m_lastPositionsLog >= kPositionsLogEvery) {
+		m_lastPositionsLog = now;
+		requestAccountSummary(false);
+	}
+}
+
+void MyEWrapper::sendDailySummary(const std::string& positions)
+{
+	m_dailyPending = false;
+	if (!alerts) return;
+
+	std::string msg = "Market closed. Today's summary:\n" + alerts->takeDayFills() + "\n" + positions;
+	if (engine) msg += "\nGPT: " + engine->takeDayStats().describe();
+
+	std::vector<std::pair<std::string, double>> scores;
+	for (auto& [ticker, score] : gpt->snapshot())
+		if (std::abs(score) >= 0.01) scores.push_back({ ticker, score });
+	std::sort(scores.begin(), scores.end(),
+		[](const auto& a, const auto& b) { return std::abs(a.second) > std::abs(b.second); });
+	if (!scores.empty()) {
+		msg += "\nBiggest scores (+ = bot leans buy, - = sell):";
+		for (size_t i = 0; i < scores.size() && i < 5; ++i) {
+			char line[80];
+			std::snprintf(line, sizeof(line), "\n%s %+.2f", scores[i].first.c_str(), scores[i].second);
+			msg += line;
+		}
+	}
+	alerts->now(msg);
 }
 
 void MyEWrapper::mktOpen()
@@ -396,12 +497,7 @@ void MyEWrapper::rebalance()
 		contr.exchange = "SMART";
 		contr.currency = "USD";
 
-		Order o;
-		o.orderType = "MKT";
-		o.tif = "DAY";
-		o.totalQuantity = DecimalFunctions::stringToDecimal(std::to_string(half));
-
-		o.action = (pos > 0) ? "SELL" : "BUY";
+		Order o = adaptiveMarketOrder(pos > 0 ? "SELL" : "BUY", half);
 
 		placeAndRemember(contr, o, half, 0.0);
 

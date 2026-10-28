@@ -2,6 +2,7 @@
 
 #include "Alerts.h"
 
+#include <cmath>
 #include <cstdio>
 #include <iostream>
 
@@ -55,6 +56,32 @@ void Alerts::addFill(long orderId, const std::string& symbol, const std::string&
     }
     it->second.shares += shares;
     it->second.cost += shares * price;
+
+    dayOrders.insert(orderId);
+    if (it->second.side == "BUY") dayBought += shares * price;
+    else daySold += shares * price;
+}
+
+std::string Alerts::takeDayFills()
+{
+    std::lock_guard<std::mutex> lock(m);
+    std::string s = dayOrders.empty() ? "Orders filled: none"
+        : "Orders filled: " + std::to_string(dayOrders.size()) + " (bought " + dollars(dayBought) + ", sold " + dollars(daySold) + ")";
+    dayOrders.clear();
+    dayBought = daySold = 0;
+    return s;
+}
+
+std::string dollars(double amount)
+{
+    long long whole = static_cast<long long>(std::llround(std::abs(amount)));
+    std::string digits = std::to_string(whole);
+    std::string out;
+    for (size_t i = 0; i < digits.size(); ++i) {
+        if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+        out += digits[i];
+    }
+    return (amount < 0 && whole != 0 ? "-$" : "$") + out;
 }
 
 void Alerts::tick()

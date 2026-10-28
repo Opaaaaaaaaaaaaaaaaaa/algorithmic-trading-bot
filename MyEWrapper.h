@@ -66,6 +66,9 @@ public:
 	void position(const std::string& account, const Contract& contract, Decimal position, double avgCost);
 	void positionEnd();
 	void execDetails(int reqId, const Contract& contract, const Execution& execution) override;
+	void accountSummary(int reqId, const std::string& account, const std::string& tag,
+		const std::string& value, const std::string& currency);
+	void accountSummaryEnd(int reqId);
 	// IBKR's order status update. permId is int in some TWS API versions and long long in
 	// others; both are declared so whichever one your version uses gets called.
 	void orderStatus(OrderId orderId, const std::string& status, Decimal filled, Decimal remaining,
@@ -84,6 +87,8 @@ public:
 	void setOrderBook(OrderBook& b);
 	// Call regularly: alerts about orders that are taking too long to fill.
 	void checkOrders();
+	// Call regularly: logs the positions once an hour and finishes the daily summary.
+	void reportTick();
 	void executeTrades();
 	void waitMktOpen();
 	void mktOpen();
@@ -102,7 +107,15 @@ private:
 	void placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare);
 	void onOrderStatus(long orderId, const std::string& status, double filled, double remaining);
 	void endOrder(long orderId, const std::string& why, bool rejected);
+	void requestAccountSummary(bool forDailySummary);
+	void sendDailySummary(const std::string& positions);
 	std::unordered_map<std::string, double> m_rebalanceMap;
+
+	bool m_summaryPending = false;   // waiting for IBKR's account summary
+	bool m_dailyPending = false;     // send the daily summary once it arrives
+	std::chrono::steady_clock::time_point m_summaryAsked, m_lastPositionsLog;
+	std::string m_summaryCurrency;
+	std::unordered_map<std::string, double> m_summaryValues;  // tag -> value
 
 	EReaderOSSignal m_osSignal;
 	EClientSocket* const m_pClient;

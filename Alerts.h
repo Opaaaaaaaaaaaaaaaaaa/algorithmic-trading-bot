@@ -5,10 +5,13 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "APITelegram.h"
 
+// 12345.6 -> "$12,346", -3400 -> "-$3,400"
+std::string dollars(double amount);
 
 class Alerts {
 public:
@@ -26,6 +29,9 @@ public:
 
     // Call often (every few seconds to a minute). Sends due alerts and the hourly summary.
     void tick();
+
+    // "Orders filled: 12 (bought $5,000, sold $3,000)" since the last call, then starts over.
+    std::string takeDayFills();
 
 private:
     struct Problem {
@@ -46,5 +52,7 @@ private:
     std::vector<long> fillOrder;            // order ids in the order they first filled
     std::unordered_map<long, Fill> fills;   // order id -> totals
     std::chrono::steady_clock::time_point lastSummary = std::chrono::steady_clock::now();
+    std::unordered_set<long> dayOrders;     // order ids filled since the last daily summary
+    double dayBought = 0, daySold = 0;
     APITelegram telegram;
 };

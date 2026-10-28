@@ -8,7 +8,7 @@ APIGpt::APIGpt(StateStore& s)
 {
     body = {
     {"model", "gpt-6-luna"},
-    {"reasoning_effort", "low"},
+    {"reasoning_effort", "medium"},
     {"response_format", {{"type", "json_object"}}},
     {"messages", {
         {{"role", "system"}, {"content", gptRole}},

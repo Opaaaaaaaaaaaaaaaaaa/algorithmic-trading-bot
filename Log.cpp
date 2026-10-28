@@ -12,6 +12,12 @@
 #include <streambuf>
 #include <vector>
 
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 namespace {
 
 std::mutex g_mutex;
@@ -71,10 +77,17 @@ protected:
 		return ch;
 	}
 
+	// Whole lines go to the console at once, so a multi-byte character like an emoji
+	// is never split between two writes (Windows would show it as garbage).
 	std::streamsize xsputn(const char* s, std::streamsize n) override
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);
-		m_console->sputn(s, n);
+		m_line.append(s, static_cast<size_t>(n));
+		size_t end = m_line.rfind('\n');
+		if (end != std::string::npos) {
+			m_console->sputn(m_line.data(), static_cast<std::streamsize>(end + 1));
+			m_line.erase(0, end + 1);
+		}
 		writeToFile(s, n);
 		return n;
 	}
@@ -82,18 +95,26 @@ protected:
 	int sync() override
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);
+		if (!m_line.empty()) {
+			m_console->sputn(m_line.data(), static_cast<std::streamsize>(m_line.size()));
+			m_line.clear();
+		}
 		g_file.flush();
 		return m_console->pubsync();
 	}
 
 private:
 	std::streambuf* m_console;
+	std::string m_line;
 };
 
 }
 
 void startLogging(const std::string& dir)
 {
+#ifdef _WIN32
+	SetConsoleOutputCP(CP_UTF8);
+#endif
 	std::error_code ec;
 	std::filesystem::create_directories(dir, ec);
 	g_dir = dir;
