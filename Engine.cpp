@@ -46,6 +46,8 @@ void Engine::run()
             }
         }
 
+        gpt.decay();
+
         lastLoop.store(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
 
@@ -215,7 +217,6 @@ bool Engine::canTradeNow()
 
 void Engine::notifyRebalanceMap()
 {
-    gpt.rebalanceTickerConfidenceMap();
     state.set("lastMarketOpen", todayInNewYork());
 }
 

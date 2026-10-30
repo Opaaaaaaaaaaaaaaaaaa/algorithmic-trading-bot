@@ -72,7 +72,7 @@ std::string Alerts::takeDayFills()
     return s;
 }
 
-std::string dollars(double amount)
+std::string dollars(double amount, const std::string& sign)
 {
     long long whole = static_cast<long long>(std::llround(std::abs(amount)));
     std::string digits = std::to_string(whole);
@@ -81,7 +81,7 @@ std::string dollars(double amount)
         if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
         out += digits[i];
     }
-    return (amount < 0 && whole != 0 ? "-$" : "$") + out;
+    return (amount < 0 && whole != 0 ? "-" : "") + sign + out;
 }
 
 void Alerts::tick()

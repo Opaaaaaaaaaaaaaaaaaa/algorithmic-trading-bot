@@ -10,8 +10,8 @@
 
 #include "APITelegram.h"
 
-// 12345.6 -> "$12,346", -3400 -> "-$3,400"
-std::string dollars(double amount);
+// 12345.6 -> "$12,346", -3400 -> "-$3,400". Pass another sign for other currencies.
+std::string dollars(double amount, const std::string& sign = "$");
 
 class Alerts {
 public:

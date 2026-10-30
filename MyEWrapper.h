@@ -110,6 +110,7 @@ private:
 	void requestAccountSummary(bool forDailySummary);
 	void sendDailySummary(const std::string& positions);
 	std::unordered_map<std::string, double> m_rebalanceMap;
+	std::unordered_map<std::string, double> m_avgCost;  // symbol -> average price paid per share
 
 	bool m_summaryPending = false;   // waiting for IBKR's account summary
 	bool m_dailyPending = false;     // send the daily summary once it arrives

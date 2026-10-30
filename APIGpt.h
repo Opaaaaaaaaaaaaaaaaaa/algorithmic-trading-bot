@@ -15,7 +15,8 @@ public:
     explicit APIGpt(StateStore& s);
 	nlohmann::json evaluate(const std::string& feed);
     void useScore(const std::string& ticker, double amount);
-    void rebalanceTickerConfidenceMap();
+    // Fades all scores by their age: two-thirds lost every 24 hours, a little at a time.
+    void decay();
     std::unordered_map<std::string, double> snapshot();
 
 private:
@@ -27,6 +28,7 @@ private:
     std::mutex mapMutex;
     nlohmann::json body;
     StateStore& state;
+    long long decayedAt = 0;  // unix seconds of the last decay() (saved, so restarts count the downtime)
 
 	const std::string api_key = std::getenv("GPT_KEY");
 	const std::string gptRole = R"(You are an evaluator of trading intent in WallStreetBets comments. Return ONLY valid JSON. All strings MUST use double quotes.

@@ -53,6 +53,10 @@ static Order adaptiveMarketOrder(const std::string& action, int shares)
 	return o;
 }
 
+// At the open, a position is closed completely instead of halved if the half
+// left over would be 1 share or worth less than this (in the account's currency).
+const double kCrumbValue = 100.0;
+
 const int PING_DEADLINE = 2;
 const int SLEEP_BETWEEN_PINGS = 30; 
 
@@ -423,9 +427,12 @@ void MyEWrapper::accountSummaryEnd(int reqId)
 
 	double net = m_summaryValues["NetLiquidation"] - m_summaryValues["TotalCashValue"];
 	double gross = m_summaryValues["GrossPositionValue"];
-	std::string line = "Positions: long " + dollars((gross + net) / 2) + ", short " + dollars((gross - net) / 2) +
-		", net " + dollars(net);
-	if (!m_summaryCurrency.empty()) line += " (" + m_summaryCurrency + ")";
+	std::string sign = m_summaryCurrency == "EUR" ? "\xE2\x82\xAC"   // euro sign
+		: m_summaryCurrency == "GBP" ? "\xC2\xA3"                     // pound sign
+		: m_summaryCurrency == "USD" || m_summaryCurrency.empty() ? "$"
+		: m_summaryCurrency + " ";
+	std::string line = "Positions: long " + dollars((gross + net) / 2, sign) + ", short " +
+		dollars((gross - net) / 2, sign) + ", net " + dollars(net, sign);
 	logPrintf("%s\n", line.c_str());
 
 	if (m_dailyPending) sendDailySummary(line);
@@ -489,6 +496,8 @@ void MyEWrapper::rebalance()
 	{
 		int qty = static_cast<int>(std::abs(pos));
 		int half = qty / 2;
+		int left = qty - half;
+		if (left <= 1 || left * m_avgCost[symbol] < kCrumbValue) half = qty;
 		if (half <= 0) continue;
 
 		Contract contr;
@@ -501,19 +510,22 @@ void MyEWrapper::rebalance()
 
 		placeAndRemember(contr, o, half, 0.0);
 
-		logPrintf("Rebalance order placed: %s %d %s\n", o.action.c_str(), half, symbol.c_str());
+		logPrintf("Rebalance order placed: %s %d %s%s\n", o.action.c_str(), half, symbol.c_str(),
+			half == qty ? " (closing the whole position)" : "");
 	}
 
 	engine->notifyRebalanceMap();
 
 	m_rebalanceMap.clear();
+	m_avgCost.clear();
 	m_state = ST_MARKET_OPEN_ACK;
 }
 
 
 void MyEWrapper::position(const std::string& account, const Contract& contract, Decimal position, double avgCost)
 {
-	m_rebalanceMap[contract.symbol] = std::stod(DecimalFunctions::decimalToString(position));;
+	m_rebalanceMap[contract.symbol] = std::stod(DecimalFunctions::decimalToString(position));
+	m_avgCost[contract.symbol] = avgCost;
 }
 
 void MyEWrapper::positionEnd()

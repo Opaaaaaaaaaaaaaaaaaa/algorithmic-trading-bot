@@ -1,6 +1,18 @@
 #include "APIGpt.h"
 
+#include <chrono>
 #include <cmath>
+
+// A score keeps 1/3 of its strength after 24 hours (and 1/9 after 48), fading smoothly.
+const double kHoursToThird = 24.0;
+// Scores smaller than this are dropped.
+const double kTinyScore = 0.001;
+
+static long long nowSeconds()
+{
+    return std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 
 APIGpt::APIGpt(StateStore& s)
@@ -22,6 +34,27 @@ APIGpt::APIGpt(StateStore& s)
             if (value.is_number()) tickerConfidenceMap[ticker] = value.get<double>();
         std::cout << "Loaded scores for " << tickerConfidenceMap.size() << " tickers\n";
     }
+
+    nlohmann::json at = state.get("confidenceDecayedAt");
+    decayedAt = at.is_number() ? at.get<long long>() : nowSeconds();
+}
+
+void APIGpt::decay()
+{
+    std::lock_guard<std::mutex> lock(mapMutex);
+    long long now = nowSeconds();
+    if (now <= decayedAt) return;
+    double hours = (now - decayedAt) / 3600.0;
+    decayedAt = now;
+
+    double factor = std::pow(3.0, -hours / kHoursToThird);
+    for (auto it = tickerConfidenceMap.begin(); it != tickerConfidenceMap.end();) {
+        it->second *= factor;
+        if (std::abs(it->second) < kTinyScore) it = tickerConfidenceMap.erase(it);
+        else ++it;
+    }
+    state.set("confidenceDecayedAt", decayedAt);
+    saveLocked();
 }
 
 
@@ -136,17 +169,4 @@ std::unordered_map<std::string, double> APIGpt::snapshot()
 {
     std::lock_guard<std::mutex> lock(mapMutex);
     return tickerConfidenceMap;
-}
-
-
-void APIGpt::rebalanceTickerConfidenceMap()
-{
-    std::lock_guard<std::mutex> lock(mapMutex);
-
-    for (auto& [ticker, instruction] : tickerConfidenceMap)
-    {
-        instruction /= 3;
-    }
-
-    saveLocked();
 }
