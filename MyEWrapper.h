@@ -69,6 +69,9 @@ public:
 	void accountSummary(int reqId, const std::string& account, const std::string& tag,
 		const std::string& value, const std::string& currency);
 	void accountSummaryEnd(int reqId);
+	void updatePortfolio(const Contract& contract, Decimal position, double marketPrice, double marketValue,
+		double averageCost, double unrealizedPNL, double realizedPNL, const std::string& accountName);
+	void accountDownloadEnd(const std::string& accountName);
 	// IBKR's order status update. permId is int in some TWS API versions and long long in
 	// others; both are declared so whichever one your version uses gets called.
 	void orderStatus(OrderId orderId, const std::string& status, Decimal filled, Decimal remaining,
@@ -109,6 +112,8 @@ private:
 	void endOrder(long orderId, const std::string& why, bool rejected);
 	void requestAccountSummary(bool forDailySummary);
 	void sendDailySummary(const std::string& positions);
+	void requestHedgeCheck();
+	void adjustHedge();
 	std::unordered_map<std::string, double> m_rebalanceMap;
 	std::unordered_map<std::string, double> m_avgCost;  // symbol -> average price paid per share
 
@@ -117,6 +122,12 @@ private:
 	std::chrono::steady_clock::time_point m_summaryAsked, m_lastPositionsLog;
 	std::string m_summaryCurrency;
 	std::unordered_map<std::string, double> m_summaryValues;  // tag -> value
+	std::string m_account;
+
+	bool m_hedgePending = false;     // waiting for IBKR's portfolio to size the hedge
+	std::chrono::steady_clock::time_point m_hedgeAsked, m_lastHedge;
+	double m_hedgeShortValue = 0;    // dollars the bot is short (hedge itself not included)
+	double m_hedgeShares = 0, m_hedgePrice = 0;
 
 	EReaderOSSignal m_osSignal;
 	EClientSocket* const m_pClient;
