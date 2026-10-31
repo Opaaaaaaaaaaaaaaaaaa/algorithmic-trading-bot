@@ -41,6 +41,7 @@ struct TrackedOrder {
 	double filled = 0;
 	std::chrono::steady_clock::time_point placed;
 	bool slowAlerted = false;
+	bool hedge = false;              // a hedge order: its fills change the saved hedge share count
 	std::string label() const { return action + " " + std::to_string(shares) + " " + symbol; }
 };
 
@@ -88,6 +89,7 @@ public:
 	void setPrices(APIPrice& p);
 	void setAlerts(Alerts& a);
 	void setOrderBook(OrderBook& b);
+	void setState(StateStore& s);
 	// Call regularly: alerts about orders that are taking too long to fill.
 	void checkOrders();
 	// Call regularly: logs the positions once an hour and finishes the daily summary.
@@ -106,8 +108,12 @@ private:
 	APIPrice* prices = nullptr;
 	Alerts* alerts = nullptr;
 	OrderBook* book = nullptr;
+	StateStore* state = nullptr;
 
-	void placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare);
+	void placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare, bool hedge = false);
+	double hedgeShares() const;
+	void setHedgeShares(double shares);
+	void addHedgeFill(const TrackedOrder& t, double filled);
 	void onOrderStatus(long orderId, const std::string& status, double filled, double remaining);
 	void endOrder(long orderId, const std::string& why, bool rejected);
 	void requestAccountSummary(bool forDailySummary);
@@ -126,8 +132,8 @@ private:
 
 	bool m_hedgePending = false;     // waiting for IBKR's portfolio to size the hedge
 	std::chrono::steady_clock::time_point m_hedgeAsked, m_lastHedge;
-	double m_hedgeShortValue = 0;    // dollars the bot is short (hedge itself not included)
-	double m_hedgeShares = 0, m_hedgePrice = 0;
+	double m_hedgeShortValue = 0;    // dollars the bot is short (SPY not included)
+	double m_hedgePrice = 0;
 
 	EReaderOSSignal m_osSignal;
 	EClientSocket* const m_pClient;

@@ -67,6 +67,7 @@ int main(int argc, char** argv)
 		client.setPrices(prices);
 		client.setAlerts(alerts);
 		client.setOrderBook(orderBook);
+		client.setState(state);
 		if (connectOptions) {
 			client.setConnectOptions(connectOptions);
 		}
