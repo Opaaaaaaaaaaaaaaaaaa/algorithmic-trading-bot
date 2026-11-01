@@ -26,7 +26,7 @@
 #include <algorithm>
 
 
-const double kDollarsPerPoint = 500.0;
+const double kDollarsPerPoint = 5000.0;
 // Alert if an order still isn't fully filled after this long.
 const auto kSlowFill = std::chrono::minutes(5);
 // After IBKR rejects an order for a ticker, wait this long before trying that ticker again.
