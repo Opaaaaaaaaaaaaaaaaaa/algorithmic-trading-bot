@@ -57,6 +57,15 @@ void Alerts::addFill(long orderId, const std::string& symbol, const std::string&
     it->second.shares += shares;
     it->second.cost += shares * price;
 
+    auto [pub, isNewPublic] = publicFills.try_emplace(orderId);
+    if (isNewPublic) {
+        publicOrder.push_back(orderId);
+        pub->second.symbol = it->second.symbol;
+        pub->second.side = it->second.side;
+    }
+    pub->second.shares += shares;
+    pub->second.cost += shares * price;
+
     dayOrders.insert(orderId);
     if (it->second.side == "BUY") dayBought += shares * price;
     else daySold += shares * price;
@@ -123,6 +132,27 @@ void Alerts::tick()
         }
     }
     for (const auto& msg : out) send(msg);
+}
+
+std::string Alerts::takePublicFills(size_t maxLines)
+{
+    std::lock_guard<std::mutex> lock(m);
+    std::string out;
+    size_t n = 0;
+    for (long id : publicOrder) {
+        if (n++ == maxLines) {
+            out += "...and " + std::to_string(publicOrder.size() - maxLines) + " more\n";
+            break;
+        }
+        const Fill& f = publicFills[id];
+        char line[160];
+        std::snprintf(line, sizeof(line), "%s %g %s @ $%.2f (~%s)\n",
+            f.side.c_str(), f.shares, f.symbol.c_str(), f.cost / f.shares, dollars(f.cost).c_str());
+        out += line;
+    }
+    publicOrder.clear();
+    publicFills.clear();
+    return out;
 }
 
 void Alerts::publish(const std::string& message)

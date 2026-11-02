@@ -64,6 +64,8 @@ const double kHedgeMinTrade = 5000.0;
 
 // Account value the public channel measures "since start" from (the paper account's starting balance).
 const double kStartValue = 1000000.0;
+// Keeps a post well under Telegram's 4096-character limit.
+const size_t kMaxPublicTrades = 60;
 
 // At the open, a position is closed completely instead of halved if the half
 // left over would be 1 share or worth less than this (in the account's currency).
@@ -530,6 +532,10 @@ void MyEWrapper::publishPerformance(bool closed, double account, double longValu
 
 	msg += "\nLong " + sign + compact(longValue) + " / Short " + sign + compact(shortValue) +
 		" (net " + withSign(longValue - shortValue, sign, true) + ")";
+
+	std::string trades = alerts->takePublicFills(kMaxPublicTrades);
+	msg += trades.empty() ? "\n\nNo trades since the last update."
+		: "\n\nTrades since the last update:\n" + trades;
 
 	alerts->publish(msg);
 	if (closed && state) state->set("closeValue", account);

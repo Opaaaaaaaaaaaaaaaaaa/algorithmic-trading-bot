@@ -27,6 +27,9 @@ public:
     // Post to the public channel (TELEGRAM_PUBLIC_ID), if one is set.
     void publish(const std::string& message);
 
+    // One line per order filled since the last call ("BUY 25 AAPL @ $345.22 (~$8,630)"), then starts over.
+    std::string takePublicFills(size_t maxLines);
+
     // Remember a fill for the hourly summary. Partial fills of one order are added up.
     void addFill(long orderId, const std::string& symbol, const std::string& side, double shares, double price);
 
@@ -55,6 +58,8 @@ private:
     std::vector<long> fillOrder;            // order ids in the order they first filled
     std::unordered_map<long, Fill> fills;   // order id -> totals
     std::chrono::steady_clock::time_point lastSummary = std::chrono::steady_clock::now();
+    std::vector<long> publicOrder;                // same as fills, but for the public channel posts
+    std::unordered_map<long, Fill> publicFills;
     std::unordered_set<long> dayOrders;     // order ids filled since the last daily summary
     double dayBought = 0, daySold = 0;
     APITelegram telegram;
