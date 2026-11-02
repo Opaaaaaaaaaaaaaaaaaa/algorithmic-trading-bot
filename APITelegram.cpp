@@ -1,4 +1,11 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "APITelegram.h"
+
+std::string APITelegram::env(const char* name)
+{
+	const char* v = std::getenv(name);
+	return v ? v : "";
+}
 
 void APITelegram::sendMessage(std::string s)
 {

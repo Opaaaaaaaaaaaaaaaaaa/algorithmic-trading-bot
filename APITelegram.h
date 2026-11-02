@@ -16,7 +16,7 @@ public:
 
 private:
 	void sendTo(const std::string& chat, const std::string& s);
-	static std::string env(const char* name) { const char* v = std::getenv(name); return v ? v : ""; }
+	static std::string env(const char* name);
 
 	const std::string token = env("TELEGRAM_TOKEN");
 	const std::string chatid = env("TELEGRAM_ID");
