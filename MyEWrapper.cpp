@@ -449,10 +449,13 @@ void MyEWrapper::requestAccountSummary(bool forDailySummary)
 void MyEWrapper::accountSummary(int reqId, const std::string& account, const std::string& tag,
 	const std::string& value, const std::string& currency)
 {
-	if (reqId != kAccountSummaryReqId) return;
-	if (!account.empty()) m_account = account;
+	if (reqId != kAccountSummaryReqId || !m_summaryPending) return;
+	// IBKR can send the same value more than once (and rows for other or combined accounts):
+	// keep one account and take each value as is, never adding them up.
+	if (m_account.empty() && !account.empty() && account != "All") m_account = account;
+	if (account != m_account) return;
 	try {
-		m_summaryValues[tag] += std::stod(value);
+		m_summaryValues[tag] = std::stod(value);
 		if (!currency.empty()) m_summaryCurrency = currency;
 	}
 	catch (const std::exception&) {}
@@ -462,7 +465,7 @@ void MyEWrapper::accountSummary(int reqId, const std::string& account, const std
 // Long and short then follow from the gross (long + |short|) value.
 void MyEWrapper::accountSummaryEnd(int reqId)
 {
-	if (reqId != kAccountSummaryReqId) return;
+	if (reqId != kAccountSummaryReqId || !m_summaryPending) return;  // IBKR can send the end twice
 	m_pClient->cancelAccountSummary(kAccountSummaryReqId);
 	m_summaryPending = false;
 
