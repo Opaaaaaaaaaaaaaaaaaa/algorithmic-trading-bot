@@ -125,6 +125,12 @@ void Alerts::tick()
     for (const auto& msg : out) send(msg);
 }
 
+void Alerts::publish(const std::string& message)
+{
+    std::cout << "Telegram (public): " << message << "\n";
+    telegram.sendPublic(message);
+}
+
 void Alerts::send(const std::string& message)
 {
     std::cout << "Telegram: " << message << "\n";

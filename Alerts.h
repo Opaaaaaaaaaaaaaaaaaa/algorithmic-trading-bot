@@ -24,6 +24,9 @@ public:
     // Send a message straight away.
     void now(const std::string& message);
 
+    // Post to the public channel (TELEGRAM_PUBLIC_ID), if one is set.
+    void publish(const std::string& message);
+
     // Remember a fill for the hourly summary. Partial fills of one order are added up.
     void addFill(long orderId, const std::string& symbol, const std::string& side, double shares, double price);
 

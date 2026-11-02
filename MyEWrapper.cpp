@@ -62,6 +62,9 @@ const auto kHedgeEvery = std::chrono::minutes(30);
 // Smaller differences between the hedge and the shorts are left alone.
 const double kHedgeMinTrade = 5000.0;
 
+// Account value the public channel measures "since start" from (the paper account's starting balance).
+const double kStartValue = 1000000.0;
+
 // At the open, a position is closed completely instead of halved if the half
 // left over would be 1 share or worth less than this (in the account's currency).
 const double kCrumbValue = 100.0;
@@ -471,7 +474,65 @@ void MyEWrapper::accountSummaryEnd(int reqId)
 		dollars((gross - net) / 2, sign) + ", net " + dollars(net, sign);
 	logPrintf("%s\n", line.c_str());
 
-	if (m_dailyPending) sendDailySummary(line);
+	double account = m_summaryValues["NetLiquidation"];
+	if (m_dailyPending) {
+		sendDailySummary(line);
+		publishPerformance(true, account, (gross + net) / 2, (gross - net) / 2, sign);
+	}
+	else if (engine && engine->canTradeNow()) {
+		publishPerformance(false, account, (gross + net) / 2, (gross - net) / 2, sign);
+	}
+}
+
+namespace {
+
+// 120345 -> "120k", 1250000 -> "1.25M", 950 -> "950"
+std::string compact(double amount)
+{
+	double a = std::abs(amount);
+	char buf[32];
+	if (a >= 1e6) std::snprintf(buf, sizeof(buf), "%.2fM", a / 1e6);
+	else if (a >= 1e3) std::snprintf(buf, sizeof(buf), "%.0fk", a / 1e3);
+	else std::snprintf(buf, sizeof(buf), "%.0f", a);
+	return buf;
+}
+
+std::string withSign(double amount, const std::string& sign, bool compactForm)
+{
+	std::string body = compactForm ? sign + compact(amount) : dollars(std::abs(amount), sign);
+	if (amount > 0.5) return "+" + body;
+	if (amount < -0.5) return "-" + body;
+	return body;
+}
+
+}
+
+// Hourly while the market is open, and once after the close, to the public Telegram channel.
+void MyEWrapper::publishPerformance(bool closed, double account, double longValue, double shortValue,
+	const std::string& sign)
+{
+	if (!alerts || account <= 0) return;
+
+	std::string msg = "\xF0\x9F\x93\x8A ";   // chart emoji
+	msg += closed ? "Market closed - bot performance" : "Bot performance";
+	if (m_account.rfind("DU", 0) == 0) msg += " (paper account)";
+
+	char pct[32];
+	std::snprintf(pct, sizeof(pct), "%+.2f%%", (account - kStartValue) / kStartValue * 100);
+	msg += "\nAccount: " + dollars(account, sign) + " (" + pct + " since start)";
+
+	nlohmann::json last = state ? state->get("closeValue") : nlohmann::json();
+	if (last.is_number() && last.get<double>() > 0) {
+		double prev = last.get<double>();
+		std::snprintf(pct, sizeof(pct), "%+.2f%%", (account - prev) / prev * 100);
+		msg += "\nToday: " + withSign(account - prev, sign, false) + " (" + pct + ")";
+	}
+
+	msg += "\nLong " + sign + compact(longValue) + " / Short " + sign + compact(shortValue) +
+		" (net " + withSign(longValue - shortValue, sign, true) + ")";
+
+	alerts->publish(msg);
+	if (closed && state) state->set("closeValue", account);
 }
 
 void MyEWrapper::reportTick()

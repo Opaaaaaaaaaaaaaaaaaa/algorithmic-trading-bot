@@ -119,6 +119,7 @@ private:
 	void requestAccountSummary(bool forDailySummary);
 	void sendDailySummary(const std::string& positions);
 	void requestHedgeCheck();
+	void publishPerformance(bool closed, double account, double longValue, double shortValue, const std::string& sign);
 	void adjustHedge();
 	std::unordered_map<std::string, double> m_rebalanceMap;
 	std::unordered_map<std::string, double> m_avgCost;  // symbol -> average price paid per share
