@@ -13,6 +13,12 @@ public:
 
     std::optional<double> get(const std::string& ticker);
 
+    struct Quote {
+        double open = 0;
+        double now = 0;
+    };
+    std::optional<Quote> quote(const std::string& ticker);
+
     void setAlerts(Alerts& a) { alerts = &a; }
     bool hasKey() const { return !key.empty(); }
 

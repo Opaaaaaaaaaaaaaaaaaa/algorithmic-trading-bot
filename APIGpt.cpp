@@ -3,9 +3,7 @@
 #include <chrono>
 #include <cmath>
 
-// A score keeps 1/3 of its strength after 24 hours (and 1/9 after 48), fading smoothly.
 const double kHoursToThird = 24.0;
-// Scores smaller than this are dropped.
 const double kTinyScore = 0.001;
 
 static long long nowSeconds()
@@ -13,7 +11,6 @@ static long long nowSeconds()
     return std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
-
 
 APIGpt::APIGpt(StateStore& s)
     : state(s)
@@ -56,7 +53,6 @@ void APIGpt::decay()
     state.set("confidenceDecayedAt", decayedAt);
     saveLocked();
 }
-
 
 void APIGpt::saveLocked()
 {
@@ -156,7 +152,6 @@ void APIGpt::loadTickerConfidenceMap(nlohmann::json content)
 
     saveLocked();
 }
-
 
 void APIGpt::useScore(const std::string& ticker, double amount)
 {

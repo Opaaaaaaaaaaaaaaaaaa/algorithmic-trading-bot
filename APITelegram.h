@@ -9,9 +9,7 @@
 
 class APITelegram {
 public:
-	// Private alerts, to TELEGRAM_ID.
 	void sendMessage(std::string s);
-	// Public channel, to TELEGRAM_PUBLIC_ID (e.g. @mychannel). Does nothing if that isn't set.
 	void sendPublic(std::string s);
 
 private:

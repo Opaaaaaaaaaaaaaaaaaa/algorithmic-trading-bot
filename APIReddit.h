@@ -11,7 +11,6 @@
 
 #include "State.h"
 
-
 class APIReddit {
 public:
     explicit APIReddit(StateStore& s);

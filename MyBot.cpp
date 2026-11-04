@@ -90,7 +90,7 @@ int main(int argc, char** argv)
 			{
 				client.waitMktOpen();
 				wait.store(false);
-				trigger.store(false);  // market closed: drop any pending trade round
+				trigger.store(false);
 				alerts.ok("Trading");
 			}
 

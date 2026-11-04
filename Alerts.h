@@ -10,33 +10,24 @@
 
 #include "APITelegram.h"
 
-// 12345.6 -> "$12,346", -3400 -> "-$3,400". Pass another sign for other currencies.
 std::string dollars(double amount, const std::string& sign = "$");
 
 class Alerts {
 public:
-    // Something is working (again). Sends "working again" if we had alerted about it.
     void ok(const std::string& what);
 
-    // Something failed. Sends one alert if it is still failing after `after`.
     void fail(const std::string& what, const std::string& detail, std::chrono::seconds after);
 
-    // Send a message straight away.
     void now(const std::string& message);
 
-    // Post to the public channel (TELEGRAM_PUBLIC_ID), if one is set.
     void publish(const std::string& message);
 
-    // One line per order filled since the last call ("BUY 25 AAPL @ $345.22 (~$8,630)"), then starts over.
     std::string takePublicFills(size_t maxLines);
 
-    // Remember a fill for the hourly summary. Partial fills of one order are added up.
     void addFill(long orderId, const std::string& symbol, const std::string& side, double shares, double price);
 
-    // Call often (every few seconds to a minute). Sends due alerts and the hourly summary.
     void tick();
 
-    // "Orders filled: 12 (bought $5,000, sold $3,000)" since the last call, then starts over.
     std::string takeDayFills();
 
 private:
@@ -55,12 +46,12 @@ private:
 
     std::mutex m;
     std::unordered_map<std::string, Problem> problems;
-    std::vector<long> fillOrder;            // order ids in the order they first filled
-    std::unordered_map<long, Fill> fills;   // order id -> totals
+    std::vector<long> fillOrder;
+    std::unordered_map<long, Fill> fills;
     std::chrono::steady_clock::time_point lastSummary = std::chrono::steady_clock::now();
-    std::vector<long> publicOrder;                // same as fills, but for the public channel posts
+    std::vector<long> publicOrder;
     std::unordered_map<long, Fill> publicFills;
-    std::unordered_set<long> dayOrders;     // order ids filled since the last daily summary
+    std::unordered_set<long> dayOrders;
     double dayBought = 0, daySold = 0;
     APITelegram telegram;
 };

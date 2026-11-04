@@ -9,7 +9,6 @@
 
 using namespace std::chrono;
 
-
 const auto kFresh = seconds(60);
 
 const auto kFallback = minutes(30);
@@ -48,7 +47,6 @@ std::optional<double> APIPrice::get(const std::string& ticker)
         return price;
     }
 
-   
     if (it != cache.end() && it->second.price && now - it->second.fetched < kFallback)
         return it->second.price;
 
@@ -86,5 +84,27 @@ std::optional<double> APIPrice::fetch(const std::string& ticker, bool& unknownSy
         lastError = "bad reply";
         std::cerr << "Price lookup for " << ticker << " returned bad JSON: " << e.what() << "\n";
     }
+    return std::nullopt;
+}
+
+std::optional<APIPrice::Quote> APIPrice::quote(const std::string& ticker)
+{
+    if (key.empty()) return std::nullopt;
+
+    cpr::Response r = cpr::Get(
+        cpr::Url{ "https://finnhub.io/api/v1/quote" },
+        cpr::Parameters{ {"symbol", ticker}, {"token", key} },
+        cpr::Timeout{ 5000 }
+    );
+    if (r.status_code != 200) return std::nullopt;
+
+    try {
+        nlohmann::json j = nlohmann::json::parse(r.text);
+        if (!j.contains("o") || !j["o"].is_number() || !j.contains("c") || !j["c"].is_number()) return std::nullopt;
+        Quote q{ j["o"].get<double>(), j["c"].get<double>() };
+        if (q.open <= 0 || q.now <= 0) return std::nullopt;
+        return q;
+    }
+    catch (const std::exception&) {}
     return std::nullopt;
 }

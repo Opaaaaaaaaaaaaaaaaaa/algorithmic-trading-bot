@@ -1,12 +1,12 @@
 #include "Engine.h"
 #include "MyEWrapper.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iostream>
 
 const size_t kGptBatchSize = 100;
-// The WSB ratio looks at this many days of sentiment.
 const size_t kSentimentDays = 5;
 
 Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s, Alerts& a)
@@ -28,11 +28,14 @@ Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>&
                 sentimentDays[date] = { v[0].get<double>(), v[1].get<double>() };
     }
 
-    nlohmann::json last = state.get("lastMarketOpen");
-    bool alreadyOpenedToday = last.is_string() && last.get<std::string>() == todayInNewYork();
-    mktOpen = canTradeNow() && alreadyOpenedToday;
-}
+    nlohmann::json savedHype = state.get("overnightHype");
+    if (savedHype.is_object()) {
+        for (auto& [ticker, v] : savedHype.items())
+            if (v.is_number()) hype[ticker] = v.get<double>();
+    }
 
+    mktOpen = false;
+}
 
 void Engine::run()
 {
@@ -76,7 +79,6 @@ void Engine::run()
             std::cout << comment["id"] << " :" << comment["text"] << "\n\n";
         }
 
-       
         const nlohmann::json& all = commentsPayload["data"];
         for (size_t start = 0; start < all.size(); start += kGptBatchSize) {
             nlohmann::json batch = { {"data", nlohmann::json::array()} };
@@ -100,6 +102,9 @@ void Engine::run()
                         hourStats.add(ev["confidence"].get<double>());
                         dayStats.add(ev["confidence"].get<double>());
                         addToSentimentDays(ev["confidence"].get<double>());
+                        double c = ev["confidence"].get<double>();
+                        if (c > 0 && ev.contains("ticker") && ev["ticker"].is_string() && !ev["ticker"].get<std::string>().empty())
+                            hype[ev["ticker"].get<std::string>()] += c * c;
                     }
                 }
             }
@@ -110,7 +115,6 @@ void Engine::run()
             }
         }
 
-
         reddit.saveState();
 
         {
@@ -118,6 +122,7 @@ void Engine::run()
             nlohmann::json days = nlohmann::json::object();
             for (auto& [date, w] : sentimentDays) days[date] = { w.first, w.second };
             state.set("sentimentDays", days);
+            state.set("overnightHype", hype);
         }
 
         if (std::chrono::steady_clock::now() - lastHourLog >= std::chrono::hours(1)) {
@@ -129,7 +134,7 @@ void Engine::run()
             hourStats = Sentiment();
         }
 
-        if(mktOpen) trigger.store(true);
+        if (mktOpen && !rebalancedToday()) trigger.store(true);
 
         alerts.tick();
 
@@ -137,52 +142,45 @@ void Engine::run()
     }
 }
 
-
 namespace {
 
 using namespace std::chrono;
 
-// NYSE full-day closures. Source: nyse.com/markets/hours-calendars.
-// Update this list once a year.
 constexpr year_month_day kNyseHolidays[] = {
-    // 2026
-    2026y / January / 1,    // New Year's Day
-    2026y / January / 19,   // Martin Luther King Jr. Day
-    2026y / February / 16,  // Washington's Birthday
-    2026y / April / 3,      // Good Friday
-    2026y / May / 25,       // Memorial Day
-    2026y / June / 19,      // Juneteenth
-    2026y / July / 3,       // Independence Day (observed)
-    2026y / September / 7,  // Labor Day
-    2026y / November / 26,  // Thanksgiving Day
-    2026y / December / 25,  // Christmas Day
-    // 2027
-    2027y / January / 1,    // New Year's Day
-    2027y / January / 18,   // Martin Luther King Jr. Day
-    2027y / February / 15,  // Washington's Birthday
-    2027y / March / 26,     // Good Friday
-    2027y / May / 31,       // Memorial Day
-    2027y / June / 18,      // Juneteenth (observed)
-    2027y / July / 5,       // Independence Day (observed)
-    2027y / September / 6,  // Labor Day
-    2027y / November / 25,  // Thanksgiving Day
-    2027y / December / 24,  // Christmas Day (observed)
+    2026y / January / 1,
+    2026y / January / 19,
+    2026y / February / 16,
+    2026y / April / 3,
+    2026y / May / 25,
+    2026y / June / 19,
+    2026y / July / 3,
+    2026y / September / 7,
+    2026y / November / 26,
+    2026y / December / 25,
+    2027y / January / 1,
+    2027y / January / 18,
+    2027y / February / 15,
+    2027y / March / 26,
+    2027y / May / 31,
+    2027y / June / 18,
+    2027y / July / 5,
+    2027y / September / 6,
+    2027y / November / 25,
+    2027y / December / 24,
 };
 
-// NYSE early closes (13:00 New York time).
 constexpr year_month_day kNyseEarlyCloses[] = {
-    2026y / November / 27,  // Day after Thanksgiving
-    2026y / December / 24,  // Christmas Eve
-    2027y / November / 26,  // Day after Thanksgiving
+    2026y / November / 27,
+    2026y / December / 24,
+    2027y / November / 26,
 };
 
 constexpr year kLastListedYear = 2027y;
 
-// The bot trades from 9:40, 10 minutes after the 9:30 open when spreads have settled,
-// until the close at 16:00 (13:00 on early-close days), New York time.
 constexpr minutes kTradeStart = 9h + 40min;
 constexpr minutes kTradeEnd = 16h;
 constexpr minutes kTradeEndEarlyClose = 13h;
+constexpr minutes kRebalanceBeforeClose = 10min;
 
 template <size_t N>
 bool contains(const year_month_day (&days)[N], const year_month_day& d)
@@ -192,7 +190,7 @@ bool contains(const year_month_day (&days)[N], const year_month_day& d)
     return false;
 }
 
-} // namespace
+}
 
 std::string Engine::todayInNewYork()
 {
@@ -205,17 +203,25 @@ std::string Engine::todayInNewYork()
     return buf;
 }
 
-bool Engine::canTradeNow()
+struct NyClock {
+    bool tradingDay = false;
+    minutes timeOfDay{ 0 };
+    minutes close{ 0 };
+};
+
+static NyClock nyClock()
 {
-    // Work in New York time so US daylight saving and the machine's own
-    // time zone don't matter.
     zoned_time ny{ "America/New_York", system_clock::now() };
     local_time<minutes> now = floor<minutes>(ny.get_local_time());
     local_days today = floor<days>(now);
     year_month_day date{ today };
 
+    NyClock c;
+    c.timeOfDay = now - today;
+    c.close = contains(kNyseEarlyCloses, date) ? kTradeEndEarlyClose : kTradeEnd;
+
     weekday wd{ today };
-    if (wd == Saturday || wd == Sunday) return false;
+    if (wd == Saturday || wd == Sunday) return c;
 
     if (date.year() > kLastListedYear) {
         static bool warned = false;
@@ -226,17 +232,47 @@ bool Engine::canTradeNow()
         }
     }
 
-    if (contains(kNyseHolidays, date)) return false;
-
-    minutes timeOfDay = now - today;
-    minutes end = contains(kNyseEarlyCloses, date) ? kTradeEndEarlyClose : kTradeEnd;
-
-    return timeOfDay >= kTradeStart && timeOfDay < end;
+    c.tradingDay = !contains(kNyseHolidays, date);
+    return c;
 }
 
-void Engine::notifyRebalanceMap()
+bool Engine::canTradeNow()
 {
-    state.set("lastMarketOpen", todayInNewYork());
+    NyClock c = nyClock();
+    return c.tradingDay && c.timeOfDay >= kTradeStart && c.timeOfDay < c.close;
+}
+
+bool Engine::rebalancedToday()
+{
+    std::string today = todayInNewYork();
+    for (const char* key : { "lastRebalance", "lastMarketOpen" }) {
+        nlohmann::json last = state.get(key);
+        if (last.is_string() && last.get<std::string>() == today) return true;
+    }
+    return false;
+}
+
+bool Engine::rebalanceDue()
+{
+    NyClock c = nyClock();
+    return c.tradingDay && c.timeOfDay >= c.close - kRebalanceBeforeClose && c.timeOfDay < c.close && !rebalancedToday();
+}
+
+void Engine::markRebalanced()
+{
+    state.set("lastRebalance", todayInNewYork());
+}
+
+std::vector<std::string> Engine::takeTopHype(size_t n)
+{
+    std::lock_guard<std::mutex> lock(statsMutex);
+    std::vector<std::pair<std::string, double>> all(hype.begin(), hype.end());
+    std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::vector<std::string> top;
+    for (size_t i = 0; i < all.size() && i < n; ++i) top.push_back(all[i].first);
+    hype.clear();
+    state.set("overnightHype", hype);
+    return top;
 }
 
 void Sentiment::add(double confidence)
@@ -256,7 +292,6 @@ std::string Sentiment::describe() const
     return buf;
 }
 
-// Called with statsMutex held.
 void Engine::addToSentimentDays(double confidence)
 {
     auto& day = sentimentDays[todayInNewYork()];
@@ -285,7 +320,7 @@ Sentiment Engine::takeDayStats()
 long long Engine::minutesSinceLastLoop() const
 {
     long long last = lastLoop.load();
-    if (last == 0) return 0;  // hasn't started yet
+    if (last == 0) return 0;
     long long now = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     return (now - last) / 60;

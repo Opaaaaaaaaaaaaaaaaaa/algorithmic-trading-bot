@@ -77,8 +77,6 @@ protected:
 		return ch;
 	}
 
-	// Whole lines go to the console at once, so a multi-byte character like an emoji
-	// is never split between two writes (Windows would show it as garbage).
 	std::streamsize xsputn(const char* s, std::streamsize n) override
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);

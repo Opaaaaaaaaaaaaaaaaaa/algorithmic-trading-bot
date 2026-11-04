@@ -8,9 +8,7 @@
 
 using namespace std::chrono;
 
-// How often the filled-orders summary is sent (only if something filled).
 const auto kSummaryEvery = hours(1);
-// Keep each summary well under Telegram's 4096-character limit.
 const size_t kMaxSummaryLines = 40;
 
 void Alerts::ok(const std::string& what)

@@ -26,25 +26,15 @@
 #include <algorithm>
 #include <cstdlib>
 
-
-// Dollars traded per score point. Buys are bigger because WSB leans bullish, so the bot gets
-// more sell signals than buy signals; this evens out longs and shorts on an average day.
-// Check the "WSB 5-day ratio" in the log/daily summary now and then and adjust the buy value.
-const double kDollarsPerPointBuy = 8500.0;
 const double kDollarsPerPointSell = 5000.0;
-// Alert if an order still isn't fully filled after this long.
+const double kDollarsPerPointBuy  = 8500.0;
 const auto kSlowFill = std::chrono::minutes(5);
-// After IBKR rejects an order for a ticker, wait this long before trying that ticker again.
 const auto kRetryAfterReject = std::chrono::minutes(15);
 
-
-// Request id for IBKR's account summary (kept far away from order ids).
 const int kAccountSummaryReqId = 2000000001;
 const auto kPositionsLogEvery = std::chrono::hours(1);
-// Send the daily summary without positions if TWS hasn't answered by then.
 const auto kSummaryTimeout = std::chrono::minutes(2);
 
-// Market order worked by IBKR's Adaptive algo, which tries to fill inside the spread.
 static Order adaptiveMarketOrder(const std::string& action, int shares)
 {
 	Order o;
@@ -58,17 +48,14 @@ static Order adaptiveMarketOrder(const std::string& action, int shares)
 	return o;
 }
 
-// The old hedge's leftover SPY shares are sold this long after the open.
-const std::string kHedgeSymbol = "SPY";
-const auto kHedgeUnwindDelay = std::chrono::minutes(30);
+const size_t kOvernightPicks = 5;
+const double kOvernightDollars = 10000.0;
+const char* const kOvernightCsv = "logs/overnight_test.csv";
+const auto kOvernightRetry = std::chrono::minutes(5);
 
-// Account value the public channel measures "since start" from (the paper account's starting balance).
 const double kStartValue = 1000000.0;
-// Keeps a post well under Telegram's 4096-character limit.
 const size_t kMaxPublicTrades = 60;
 
-// At the open, a position is closed completely instead of halved if the half
-// left over would be 1 share or worth less than this (in the account's currency).
 const double kCrumbValue = 100.0;
 
 const int PING_DEADLINE = 2;
@@ -150,11 +137,9 @@ void MyEWrapper::error(int id, time_t errorTime, int errorCode, const std::strin
 
 	if (!alerts) return;
 
-	// A message about one of our orders. Codes 399 and 2100-2999 are only warnings.
 	if (book && book->orders.count(id)) {
 		std::string what = errorString + " (code " + std::to_string(errorCode) + ")";
 		bool warningOnly = errorCode == 399 || (errorCode >= 2100 && errorCode < 3000);
-		// 200 unknown symbol, 201 rejected, 202 cancelled, 203 not allowed for this account.
 		bool orderIsDead = errorCode >= 200 && errorCode <= 203;
 
 		if (orderIsDead)
@@ -163,7 +148,6 @@ void MyEWrapper::error(int id, time_t errorTime, int errorCode, const std::strin
 			alerts->now("[ALERT] IBKR message about order " + book->orders[id].label() + ": " + what);
 	}
 
-	// TWS lost / regained its own connection to IBKR's servers.
 	if (errorCode == 1100)
 		alerts->fail("IBKR server connection", "TWS lost its connection to IBKR's servers", std::chrono::minutes(3));
 	if (errorCode == 1101 || errorCode == 1102)
@@ -187,9 +171,6 @@ void MyEWrapper::processMessages()
 		break;
 	case ST_WAIT_MARKET_OPEN:
 		break;
-	case ST_MARKET_OPEN:
-		loadRebalanceMap();
-		break;
 	case ST_LOAD_REBALANCE_MAP:
 		break;
 	case ST_REBALANCE:
@@ -210,7 +191,6 @@ void MyEWrapper::processMessages()
 	errno = 0;
 	m_pReader->processMsgs();
 }
-
 
 void MyEWrapper::setEngine(Engine& e)
 {
@@ -242,25 +222,7 @@ void MyEWrapper::setState(StateStore& s)
 	state = &s;
 }
 
-double MyEWrapper::hedgeShares() const
-{
-	if (!state) return 0;
-	nlohmann::json v = state->get("hedgeShares");
-	return v.is_number() ? v.get<double>() : 0;
-}
-
-void MyEWrapper::setHedgeShares(double shares)
-{
-	if (state) state->set("hedgeShares", shares < 0 ? 0 : shares);
-}
-
-void MyEWrapper::addHedgeFill(const TrackedOrder& t, double filled)
-{
-	if (!t.hedge || filled <= 0) return;
-	setHedgeShares(hedgeShares() + (t.action == "BUY" ? filled : -filled));
-}
-
-void MyEWrapper::placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare, bool hedge)
+void MyEWrapper::placeAndRemember(const Contract& contr, const Order& o, int shares, double pointsPerShare)
 {
 	if (book) {
 		TrackedOrder t;
@@ -268,7 +230,6 @@ void MyEWrapper::placeAndRemember(const Contract& contr, const Order& o, int sha
 		t.action = o.action;
 		t.shares = shares;
 		t.pointsPerShare = pointsPerShare;
-		t.hedge = hedge;
 		t.placed = std::chrono::steady_clock::now();
 		book->orders[m_orderId] = t;
 	}
@@ -293,13 +254,12 @@ void MyEWrapper::onOrderStatus(long orderId, const std::string& status, double f
 {
 	if (!book) return;
 	auto it = book->orders.find(orderId);
-	if (it == book->orders.end()) return;  // not ours, or already finished
+	if (it == book->orders.end()) return;
 
 	it->second.filled = filled;
 
 	if (status == "Filled" || remaining <= 0) {
 		if (alerts) alerts->ok("Orders for " + it->second.symbol);
-		addHedgeFill(it->second, filled);
 		book->orders.erase(it);
 	}
 	else if (status == "Cancelled" || status == "ApiCancelled" || status == "Inactive") {
@@ -307,14 +267,12 @@ void MyEWrapper::onOrderStatus(long orderId, const std::string& status, double f
 	}
 }
 
-// The order won't fill any further: give the unfilled part's score back and alert.
 void MyEWrapper::endOrder(long orderId, const std::string& why, bool rejected)
 {
 	auto it = book->orders.find(orderId);
 	if (it == book->orders.end()) return;
 	TrackedOrder t = it->second;
 	book->orders.erase(it);
-	addHedgeFill(t, t.filled);
 
 	double unfilled = t.shares - t.filled;
 	std::string msg = t.label() + ": " + why + ". ";
@@ -325,7 +283,6 @@ void MyEWrapper::endOrder(long orderId, const std::string& why, bool rejected)
 	}
 
 	if (unfilled > 0 && t.pointsPerShare > 0) {
-		// Undo the score taken off for the shares that never traded.
 		double points = unfilled * t.pointsPerShare;
 		gpt->useScore(t.symbol, t.action == "BUY" ? -points : points);
 		msg += "Score for the unfilled shares was given back";
@@ -335,8 +292,6 @@ void MyEWrapper::endOrder(long orderId, const std::string& why, bool rejected)
 	if (rejected) book->retryAfter[t.symbol] = std::chrono::steady_clock::now() + kRetryAfterReject;
 
 	logPrintf("Order ended: %s\n", msg.c_str());
-	// Keyed per ticker: repeated rejections of the same ticker alert only once,
-	// and you get an [OK] once an order for it fills again.
 	if (alerts) alerts->fail("Orders for " + t.symbol, msg, std::chrono::seconds(0));
 }
 
@@ -354,7 +309,6 @@ void MyEWrapper::checkOrders()
 	}
 }
 
-// IBKR reports each (partial) fill here. Collected for the hourly Telegram summary.
 void MyEWrapper::execDetails(int reqId, const Contract& contract, const Execution& execution)
 {
 	double shares = std::stod(DecimalFunctions::decimalToString(execution.shares));
@@ -369,7 +323,6 @@ void MyEWrapper::executeTrades()
 	{
 		if (std::abs(score) < 1.0) continue;
 
-		// Recently rejected by IBKR: wait before trying this ticker again.
 		if (book) {
 			auto wait = book->retryAfter.find(ticker);
 			if (wait != book->retryAfter.end()) {
@@ -381,7 +334,6 @@ void MyEWrapper::executeTrades()
 		std::optional<double> price = prices ? prices->get(ticker) : std::nullopt;
 		if (!price) continue;  
 
-		
 		double dollarsPerPoint = score > 0 ? kDollarsPerPointBuy : kDollarsPerPointSell;
 		double dollars = std::abs(score) * dollarsPerPoint;
 
@@ -398,7 +350,6 @@ void MyEWrapper::executeTrades()
 
 		placeAndRemember(contr, o, shares, *price / dollarsPerPoint);
 
-		
 		double used = shares * *price / dollarsPerPoint;
 		gpt->useScore(ticker, score > 0 ? used : -used);
 
@@ -425,7 +376,6 @@ void MyEWrapper::waitMktOpen()
 {
 	m_state = ST_WAIT_MARKET_OPEN;
 
-	// Market closed: DAY orders that didn't fully fill are over.
 	if (book) {
 		std::vector<long> open;
 		for (auto& [id, t] : book->orders) open.push_back(id);
@@ -450,8 +400,6 @@ void MyEWrapper::accountSummary(int reqId, const std::string& account, const std
 	const std::string& value, const std::string& currency)
 {
 	if (reqId != kAccountSummaryReqId || !m_summaryPending) return;
-	// IBKR can send the same value more than once (and rows for other or combined accounts):
-	// keep one account and take each value as is, never adding them up.
 	if (m_account.empty() && !account.empty() && account != "All") m_account = account;
 	if (account != m_account) return;
 	try {
@@ -461,18 +409,16 @@ void MyEWrapper::accountSummary(int reqId, const std::string& account, const std
 	catch (const std::exception&) {}
 }
 
-// Net position value = net liquidation - cash, because short sale money sits in cash.
-// Long and short then follow from the gross (long + |short|) value.
 void MyEWrapper::accountSummaryEnd(int reqId)
 {
-	if (reqId != kAccountSummaryReqId || !m_summaryPending) return;  // IBKR can send the end twice
+	if (reqId != kAccountSummaryReqId || !m_summaryPending) return;
 	m_pClient->cancelAccountSummary(kAccountSummaryReqId);
 	m_summaryPending = false;
 
 	double net = m_summaryValues["NetLiquidation"] - m_summaryValues["TotalCashValue"];
 	double gross = m_summaryValues["GrossPositionValue"];
-	std::string sign = m_summaryCurrency == "EUR" ? "\xE2\x82\xAC"   // euro sign
-		: m_summaryCurrency == "GBP" ? "\xC2\xA3"                     // pound sign
+	std::string sign = m_summaryCurrency == "EUR" ? "\xE2\x82\xAC"
+		: m_summaryCurrency == "GBP" ? "\xC2\xA3"
 		: m_summaryCurrency == "USD" || m_summaryCurrency.empty() ? "$"
 		: m_summaryCurrency + " ";
 	std::string line = "Positions: long " + dollars((gross + net) / 2, sign) + ", short " +
@@ -491,7 +437,6 @@ void MyEWrapper::accountSummaryEnd(int reqId)
 
 namespace {
 
-// 120345 -> "120k", 1250000 -> "1.25M", 950 -> "950"
 std::string compact(double amount)
 {
 	double a = std::abs(amount);
@@ -512,13 +457,12 @@ std::string withSign(double amount, const std::string& sign, bool compactForm)
 
 }
 
-// Hourly while the market is open, and once after the close, to the public Telegram channel.
 void MyEWrapper::publishPerformance(bool closed, double account, double longValue, double shortValue,
 	const std::string& sign)
 {
 	if (!alerts || account <= 0) return;
 
-	std::string msg = "\xF0\x9F\x93\x8A ";   // chart emoji
+	std::string msg = "\xF0\x9F\x93\x8A ";
 	msg += closed ? "Market closed - bot performance" : "Bot performance";
 	if (m_account.rfind("DU", 0) == 0) msg += " (paper account)";
 
@@ -546,7 +490,7 @@ void MyEWrapper::publishPerformance(bool closed, double account, double longValu
 
 void MyEWrapper::reportTick()
 {
-	if (m_state == ST_CONNECT) return;  // not connected to TWS yet
+	if (m_state == ST_CONNECT) return;
 	auto now = std::chrono::steady_clock::now();
 
 	if (m_summaryPending && now - m_summaryAsked >= kSummaryTimeout) {
@@ -560,29 +504,14 @@ void MyEWrapper::reportTick()
 		requestAccountSummary(false);
 	}
 
-	bool marketOpen = engine && engine->canTradeNow();
-	if (marketOpen && now - m_lastHedge >= kHedgeUnwindDelay) unwindHedge();
-}
-
-// The SPY hedge was removed. SPY shares the old hedge bought (counted in "hedgeShares")
-// are sold off once, 30 minutes after the open.
-void MyEWrapper::unwindHedge()
-{
-	long long have = std::llround(hedgeShares());
-	if (have <= 0) return;
-	if (book) {
-		for (auto& [id, t] : book->orders)
-			if (t.hedge) return;  // still selling
+	if (engine && engine->rebalanceDue() &&
+		(m_state == ST_CONNECT_ACK || m_state == ST_MARKET_OPEN_ACK || m_state == ST_TRADE_ACK)) {
+		logPrintf("Halving positions before the close\n");
+		startOvernightTest();
+		loadRebalanceMap();
 	}
-	Contract contr;
-	contr.symbol = kHedgeSymbol;
-	contr.secType = "STK";
-	contr.exchange = "SMART";
-	contr.currency = "USD";
-	int shares = static_cast<int>(have);
-	Order o = adaptiveMarketOrder("SELL", shares);
-	placeAndRemember(contr, o, shares, 0.0, true);
-	logPrintf("Selling the old SPY hedge: SELL %d %s\n", shares, kHedgeSymbol.c_str());
+
+	if (engine && engine->canTradeNow()) finishOvernightTest();
 }
 
 void MyEWrapper::sendDailySummary(const std::string& positions)
@@ -616,8 +545,7 @@ void MyEWrapper::sendDailySummary(const std::string& positions)
 
 void MyEWrapper::mktOpen()
 {
-	m_state = ST_MARKET_OPEN;
-	m_lastHedge = std::chrono::steady_clock::now();  // old hedge is sold once the opening trades have filled
+	if (m_state == ST_WAIT_MARKET_OPEN) m_state = ST_MARKET_OPEN_ACK;
 }
 
 void MyEWrapper::loadRebalanceMap()
@@ -636,10 +564,6 @@ void MyEWrapper::rebalance()
 		if (left <= 1 || left * m_avgCost[symbol] < kCrumbValue) half = qty;
 		if (half <= 0) continue;
 
-		// The hedge part of SPY shrinks in step with the rest of the position.
-		if (symbol == kHedgeSymbol && qty > 0)
-			setHedgeShares(std::floor(hedgeShares() * (qty - half) / qty));
-
 		Contract contr;
 		contr.symbol = symbol;
 		contr.secType = "STK";
@@ -654,13 +578,12 @@ void MyEWrapper::rebalance()
 			half == qty ? " (closing the whole position)" : "");
 	}
 
-	engine->notifyRebalanceMap();
+	engine->markRebalanced();
 
 	m_rebalanceMap.clear();
 	m_avgCost.clear();
 	m_state = ST_MARKET_OPEN_ACK;
 }
-
 
 void MyEWrapper::position(const std::string& account, const Contract& contract, Decimal position, double avgCost)
 {
@@ -671,4 +594,104 @@ void MyEWrapper::position(const std::string& account, const Contract& contract, 
 void MyEWrapper::positionEnd()
 {
 	m_state = ST_REBALANCE;
+}
+
+void MyEWrapper::startOvernightTest()
+{
+	if (!state || !engine || !prices) return;
+	nlohmann::json test = state->get("overnightTest");
+	if (!test.is_object()) test = nlohmann::json::object();
+	if (test.contains("picks") && !test["picks"].empty())
+		logPrintf("Overnight test: dropping the picks from %s, they were never sold\n",
+			test.value("date", std::string("?")).c_str());
+
+	nlohmann::json picks = nlohmann::json::object();
+	std::string list;
+	for (const std::string& ticker : engine->takeTopHype(kOvernightPicks * 3)) {
+		if (picks.size() >= kOvernightPicks) break;
+		std::optional<double> price = prices->get(ticker);
+		if (!price) continue;
+		picks[ticker] = *price;
+		char part[64];
+		std::snprintf(part, sizeof(part), " %s @ $%.2f", ticker.c_str(), *price);
+		list += part;
+	}
+	test["date"] = engine->todayInNewYork();
+	test["picks"] = picks;
+	state->set("overnightTest", test);
+	logPrintf("Overnight test: bought%s\n", list.empty() ? " nothing" : list.c_str());
+}
+
+void MyEWrapper::finishOvernightTest()
+{
+	if (!state || !engine || !prices) return;
+	nlohmann::json test = state->get("overnightTest");
+	if (!test.is_object() || !test.contains("picks") || !test["picks"].is_object() || test["picks"].empty()) return;
+	std::string bought = test.value("date", std::string());
+	std::string today = engine->todayInNewYork();
+	if (bought == today) return;
+
+	auto now = std::chrono::steady_clock::now();
+	if (m_overnightTried != std::chrono::steady_clock::time_point{} && now - m_overnightTried < kOvernightRetry) return;
+	m_overnightTried = now;
+
+	struct Result { std::string ticker; double buy, open, later; };
+	std::vector<Result> results;
+	for (auto& [ticker, buy] : test["picks"].items()) {
+		if (!buy.is_number() || buy.get<double>() <= 0) continue;
+		std::optional<APIPrice::Quote> q = prices->quote(ticker);
+		if (!q) continue;
+		results.push_back({ ticker, buy.get<double>(), q->open, q->now });
+	}
+	if (results.empty()) {
+		logPrintf("Overnight test: no opening prices yet, trying again in 5 min\n");
+		return;
+	}
+
+	bool newFile = !std::ifstream(kOvernightCsv).good();
+	std::ofstream csv(kOvernightCsv, std::ios::app);
+	if (newFile) csv << "bought,sold,ticker,price_1550,open,price_940,return_open_pct,return_940_pct\n";
+
+	double pnlOpen = 0, pnlLater = 0, invested = 0;
+	std::string lines;
+	for (const Result& r : results) {
+		double rOpen = r.open / r.buy - 1, rLater = r.later / r.buy - 1;
+		pnlOpen += kOvernightDollars * rOpen;
+		pnlLater += kOvernightDollars * rLater;
+		invested += kOvernightDollars;
+		char line[200];
+		std::snprintf(line, sizeof(line), "\n%s $%.2f -> open $%.2f (%+.2f%%), 9:40 $%.2f (%+.2f%%)",
+			r.ticker.c_str(), r.buy, r.open, rOpen * 100, r.later, rLater * 100);
+		lines += line;
+		csv << bought << ',' << today << ',' << r.ticker << ',' << r.buy << ',' << r.open << ',' << r.later << ','
+			<< rOpen * 100 << ',' << rLater * 100 << '\n';
+	}
+
+	int nights = test.value("nights", 0) + 1;
+	double totalInvested = test.value("invested", 0.0) + invested;
+	double totalOpen = test.value("pnlOpen", 0.0) + pnlOpen;
+	double totalLater = test.value("pnl940", 0.0) + pnlLater;
+	test["nights"] = nights;
+	test["invested"] = totalInvested;
+	test["pnlOpen"] = totalOpen;
+	test["pnl940"] = totalLater;
+	test["picks"] = nlohmann::json::object();
+	state->set("overnightTest", test);
+
+	char head[400];
+	std::snprintf(head, sizeof(head),
+		"Overnight test: top %zu WSB-hyped stocks, $%.0f each, bought %s at 15:50\n"
+		"Sold at the open: %s (%+.2f%%)\nSold at 9:40: %s (%+.2f%%)",
+		results.size(), kOvernightDollars, bought.c_str(),
+		withSign(pnlOpen, "$", false).c_str(), pnlOpen / invested * 100,
+		withSign(pnlLater, "$", false).c_str(), pnlLater / invested * 100);
+	char total[300];
+	std::snprintf(total, sizeof(total),
+		"\nAll %d nights: open %s (%+.2f%% per night), 9:40 %s (%+.2f%% per night)\nSpreads and fees not included.",
+		nights, withSign(totalOpen, "$", false).c_str(), totalOpen / totalInvested * 100,
+		withSign(totalLater, "$", false).c_str(), totalLater / totalInvested * 100);
+
+	std::string msg = std::string(head) + lines + total;
+	logPrintf("%s\n", msg.c_str());
+	if (alerts) alerts->now(msg);
 }

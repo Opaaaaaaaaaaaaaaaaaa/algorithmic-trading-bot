@@ -1,6 +1,5 @@
 #include "APIReddit.h"
 
-
 const int kPageSize = 100;
 const int kMaxPages = 10;
 
@@ -72,7 +71,6 @@ bool APIReddit::fetch(std::string what)
     int requests = 0;
     bool caughtUp = false;  
     std::string after;      
-
 
     while (!caughtUp && requests < kMaxPages)
     {
@@ -157,7 +155,6 @@ bool APIReddit::fetch(std::string what)
     }
     lastFetchTime = now;
 
-    
     for (auto it = seen.begin(); it != seen.end(); )
         it = (it->second < cutoff) ? seen.erase(it) : std::next(it);
 
