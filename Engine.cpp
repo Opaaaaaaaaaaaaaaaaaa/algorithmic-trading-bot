@@ -6,10 +6,8 @@
 #include <iostream>
 
 const size_t kGptBatchSize = 100;
-// The buy multiplier looks at this many days of WSB sentiment, and stays within these limits.
+// The WSB ratio looks at this many days of sentiment.
 const size_t kSentimentDays = 5;
-const double kMinBuyMultiplier = 0.5;
-const double kMaxBuyMultiplier = 3.0;
 
 Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s, Alerts& a)
     : gpt(g)
@@ -124,10 +122,10 @@ void Engine::run()
 
         if (std::chrono::steady_clock::now() - lastHourLog >= std::chrono::hours(1)) {
             lastHourLog = std::chrono::steady_clock::now();
-            double mult = buyMultiplier();
+            double ratio = wsbRatio();
             std::lock_guard<std::mutex> lock(statsMutex);
             std::cout << "Last hour GPT: " << hourStats.describe() << "\n";
-            std::cout << "Buy multiplier: x" << mult << "\n";
+            std::cout << "WSB 5-day ratio (bullish/bearish): x" << ratio << "\n";
             hourStats = Sentiment();
         }
 
@@ -267,17 +265,13 @@ void Engine::addToSentimentDays(double confidence)
     while (sentimentDays.size() > kSentimentDays) sentimentDays.erase(sentimentDays.begin());
 }
 
-double Engine::buyMultiplier()
+double Engine::wsbRatio()
 {
     std::lock_guard<std::mutex> lock(statsMutex);
     double bullish = 0, bearish = 0;
     for (auto& [date, w] : sentimentDays) { bullish += w.first; bearish += w.second; }
-    if (bullish <= 0 && bearish <= 0) return 1.0;
-    if (bearish <= 0) return kMaxBuyMultiplier;
-    double m = bullish / bearish;
-    if (m < kMinBuyMultiplier) m = kMinBuyMultiplier;
-    if (m > kMaxBuyMultiplier) m = kMaxBuyMultiplier;
-    return m;
+    if (bearish <= 0) return bullish > 0 ? 99.0 : 1.0;
+    return bullish / bearish;
 }
 
 Sentiment Engine::takeDayStats()

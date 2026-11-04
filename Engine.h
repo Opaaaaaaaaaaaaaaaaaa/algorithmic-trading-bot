@@ -34,9 +34,9 @@ public:
 	long long minutesSinceLastLoop() const;
 	// GPT's calls since the last time this was called (for the daily summary).
 	Sentiment takeDayStats();
-	// How much bigger buy orders are made: WSB's bullish weight divided by its bearish
-	// weight over the last kSentimentDays days, limited to 0.5 - 3.
-	double buyMultiplier();
+	// WSB's bullish weight divided by its bearish weight over the last kSentimentDays days
+	// (shown in the log and daily summary, to help set kDollarsPerPointBuy; not used for trading).
+	double wsbRatio();
 
 private:
 	std::mutex clientMutex;

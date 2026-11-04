@@ -27,7 +27,11 @@
 #include <cstdlib>
 
 
-const double kDollarsPerPoint = 5000.0;
+// Dollars traded per score point. Buys are bigger because WSB leans bullish, so the bot gets
+// more sell signals than buy signals; this evens out longs and shorts on an average day.
+// Check the "WSB 5-day ratio" in the log/daily summary now and then and adjust the buy value.
+const double kDollarsPerPointBuy = 8500.0;
+const double kDollarsPerPointSell = 5000.0;
 // Alert if an order still isn't fully filled after this long.
 const auto kSlowFill = std::chrono::minutes(5);
 // After IBKR rejects an order for a ticker, wait this long before trying that ticker again.
@@ -361,11 +365,6 @@ void MyEWrapper::execDetails(int reqId, const Contract& contract, const Executio
 void MyEWrapper::executeTrades()
 {
 	std::unordered_map<std::string, double> localCopy = gpt->snapshot();
-	// WSB leans bullish, so the bot sells more than it buys. Buys are made bigger by how much
-	// more bullish than bearish WSB was over the last days, so longs and shorts even out.
-	// Only the order size changes; scores and the 1-point trigger stay the same.
-	double buyMultiplier = engine ? engine->buyMultiplier() : 1.0;
-
 	for (auto& [ticker, score] : localCopy)
 	{
 		if (std::abs(score) < 1.0) continue;
@@ -383,7 +382,7 @@ void MyEWrapper::executeTrades()
 		if (!price) continue;  
 
 		
-		double dollarsPerPoint = kDollarsPerPoint * (score > 0 ? buyMultiplier : 1.0);
+		double dollarsPerPoint = score > 0 ? kDollarsPerPointBuy : kDollarsPerPointSell;
 		double dollars = std::abs(score) * dollarsPerPoint;
 
 		int shares = static_cast<int>(dollars / *price);
@@ -404,9 +403,8 @@ void MyEWrapper::executeTrades()
 		gpt->useScore(ticker, score > 0 ? used : -used);
 
 		char msg[200];
-		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)%s",
-			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price,
-			score > 0 && buyMultiplier != 1.0 ? (" (buy x" + std::to_string(buyMultiplier).substr(0, 4) + ")").c_str() : "");
+		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)",
+			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price);
 		logPrintf("%s\n", msg);
 	}
 
@@ -596,7 +594,7 @@ void MyEWrapper::sendDailySummary(const std::string& positions)
 	if (engine) {
 		msg += "\nGPT: " + engine->takeDayStats().describe();
 		char mult[64];
-		std::snprintf(mult, sizeof(mult), "\nBuy multiplier: x%.2f", engine->buyMultiplier());
+		std::snprintf(mult, sizeof(mult), "\nWSB 5-day ratio (bullish/bearish): x%.2f", engine->wsbRatio());
 		msg += mult;
 	}
 
