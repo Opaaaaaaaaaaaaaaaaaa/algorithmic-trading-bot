@@ -6,6 +6,10 @@
 #include <iostream>
 
 const size_t kGptBatchSize = 100;
+// The buy multiplier looks at this many days of WSB sentiment, and stays within these limits.
+const size_t kSentimentDays = 5;
+const double kMinBuyMultiplier = 0.5;
+const double kMaxBuyMultiplier = 3.0;
 
 Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>& o, std::atomic<bool>& w, StateStore& s, Alerts& a)
     : gpt(g)
@@ -19,6 +23,13 @@ Engine::Engine(APIGpt& g, APIReddit& r, std::atomic<bool>& t, std::atomic<bool>&
     , alerts(a)
 {
     
+    nlohmann::json days = state.get("sentimentDays");
+    if (days.is_object()) {
+        for (auto& [date, v] : days.items())
+            if (v.is_array() && v.size() == 2 && v[0].is_number() && v[1].is_number())
+                sentimentDays[date] = { v[0].get<double>(), v[1].get<double>() };
+    }
+
     nlohmann::json last = state.get("lastMarketOpen");
     bool alreadyOpenedToday = last.is_string() && last.get<std::string>() == todayInNewYork();
     mktOpen = canTradeNow() && alreadyOpenedToday;
@@ -90,6 +101,7 @@ void Engine::run()
                         std::lock_guard<std::mutex> lock(statsMutex);
                         hourStats.add(ev["confidence"].get<double>());
                         dayStats.add(ev["confidence"].get<double>());
+                        addToSentimentDays(ev["confidence"].get<double>());
                     }
                 }
             }
@@ -103,10 +115,19 @@ void Engine::run()
 
         reddit.saveState();
 
+        {
+            std::lock_guard<std::mutex> lock(statsMutex);
+            nlohmann::json days = nlohmann::json::object();
+            for (auto& [date, w] : sentimentDays) days[date] = { w.first, w.second };
+            state.set("sentimentDays", days);
+        }
+
         if (std::chrono::steady_clock::now() - lastHourLog >= std::chrono::hours(1)) {
             lastHourLog = std::chrono::steady_clock::now();
+            double mult = buyMultiplier();
             std::lock_guard<std::mutex> lock(statsMutex);
             std::cout << "Last hour GPT: " << hourStats.describe() << "\n";
+            std::cout << "Buy multiplier: x" << mult << "\n";
             hourStats = Sentiment();
         }
 
@@ -235,6 +256,28 @@ std::string Sentiment::describe() const
     std::snprintf(buf, sizeof(buf), "%d bullish / %d bearish calls (%.0f%% bullish, %.0f%% by score)",
         bullish, bearish, 100.0 * bullish / total, weight > 0 ? 100.0 * bullishWeight / weight : 0.0);
     return buf;
+}
+
+// Called with statsMutex held.
+void Engine::addToSentimentDays(double confidence)
+{
+    auto& day = sentimentDays[todayInNewYork()];
+    if (confidence > 0) day.first += confidence * confidence;
+    if (confidence < 0) day.second += confidence * confidence;
+    while (sentimentDays.size() > kSentimentDays) sentimentDays.erase(sentimentDays.begin());
+}
+
+double Engine::buyMultiplier()
+{
+    std::lock_guard<std::mutex> lock(statsMutex);
+    double bullish = 0, bearish = 0;
+    for (auto& [date, w] : sentimentDays) { bullish += w.first; bearish += w.second; }
+    if (bullish <= 0 && bearish <= 0) return 1.0;
+    if (bearish <= 0) return kMaxBuyMultiplier;
+    double m = bullish / bearish;
+    if (m < kMinBuyMultiplier) m = kMinBuyMultiplier;
+    if (m > kMaxBuyMultiplier) m = kMaxBuyMultiplier;
+    return m;
 }
 
 Sentiment Engine::takeDayStats()

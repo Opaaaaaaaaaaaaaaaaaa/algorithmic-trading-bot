@@ -54,13 +54,9 @@ static Order adaptiveMarketOrder(const std::string& action, int shares)
 	return o;
 }
 
-// The bot holds this ETF long, worth as much as all its shorts together, so a market-wide
-// move hits the shorts and the hedge equally. It is also traded on WSB scores like any
-// ticker; the hedge part is counted separately (saved as "hedgeShares").
+// The old hedge's leftover SPY shares are sold this long after the open.
 const std::string kHedgeSymbol = "SPY";
-const auto kHedgeEvery = std::chrono::minutes(30);
-// Smaller differences between the hedge and the shorts are left alone.
-const double kHedgeMinTrade = 5000.0;
+const auto kHedgeUnwindDelay = std::chrono::minutes(30);
 
 // Account value the public channel measures "since start" from (the paper account's starting balance).
 const double kStartValue = 1000000.0;
@@ -365,6 +361,10 @@ void MyEWrapper::execDetails(int reqId, const Contract& contract, const Executio
 void MyEWrapper::executeTrades()
 {
 	std::unordered_map<std::string, double> localCopy = gpt->snapshot();
+	// WSB leans bullish, so the bot sells more than it buys. Buys are made bigger by how much
+	// more bullish than bearish WSB was over the last days, so longs and shorts even out.
+	// Only the order size changes; scores and the 1-point trigger stay the same.
+	double buyMultiplier = engine ? engine->buyMultiplier() : 1.0;
 
 	for (auto& [ticker, score] : localCopy)
 	{
@@ -383,7 +383,8 @@ void MyEWrapper::executeTrades()
 		if (!price) continue;  
 
 		
-		double dollars = std::abs(score) * kDollarsPerPoint;
+		double dollarsPerPoint = kDollarsPerPoint * (score > 0 ? buyMultiplier : 1.0);
+		double dollars = std::abs(score) * dollarsPerPoint;
 
 		int shares = static_cast<int>(dollars / *price);
 		if (shares == 0) continue; 
@@ -396,15 +397,16 @@ void MyEWrapper::executeTrades()
 
 		Order o = adaptiveMarketOrder(score > 0 ? "BUY" : "SELL", shares);
 
-		placeAndRemember(contr, o, shares, *price / kDollarsPerPoint);
+		placeAndRemember(contr, o, shares, *price / dollarsPerPoint);
 
 		
-		double used = shares * *price / kDollarsPerPoint;
+		double used = shares * *price / dollarsPerPoint;
 		gpt->useScore(ticker, score > 0 ? used : -used);
 
 		char msg[200];
-		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)",
-			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price);
+		std::snprintf(msg, sizeof(msg), "Order placed: %s %d %s @ ~$%.2f (~$%.0f)%s",
+			o.action.c_str(), shares, ticker.c_str(), *price, shares * *price,
+			score > 0 && buyMultiplier != 1.0 ? (" (buy x" + std::to_string(buyMultiplier).substr(0, 4) + ")").c_str() : "");
 		logPrintf("%s\n", msg);
 	}
 
@@ -560,82 +562,29 @@ void MyEWrapper::reportTick()
 		requestAccountSummary(false);
 	}
 
-	if (m_hedgePending && now - m_hedgeAsked >= kSummaryTimeout) {
-		m_pClient->reqAccountUpdates(false, m_account);
-		m_hedgePending = false;
-		logPrintf("Hedge: TWS didn't send the portfolio, trying again later\n");
-	}
-
 	bool marketOpen = engine && engine->canTradeNow();
-	if (marketOpen && !m_account.empty() && !m_hedgePending && now - m_lastHedge >= kHedgeEvery) {
-		m_lastHedge = now;
-		requestHedgeCheck();
-	}
+	if (marketOpen && now - m_lastHedge >= kHedgeUnwindDelay) unwindHedge();
 }
 
-void MyEWrapper::requestHedgeCheck()
+// The SPY hedge was removed. SPY shares the old hedge bought (counted in "hedgeShares")
+// are sold off once, 30 minutes after the open.
+void MyEWrapper::unwindHedge()
 {
-	m_hedgePending = true;
-	m_hedgeAsked = std::chrono::steady_clock::now();
-	m_hedgeShortValue = m_hedgePrice = 0;
-	m_pClient->reqAccountUpdates(true, m_account);
-}
-
-void MyEWrapper::updatePortfolio(const Contract& contract, Decimal position, double marketPrice, double marketValue,
-	double, double, double, const std::string&)
-{
-	if (!m_hedgePending || contract.secType != "STK") return;
-	double pos = std::stod(DecimalFunctions::decimalToString(position));
-	if (contract.symbol == kHedgeSymbol) {
-		m_hedgePrice = marketPrice;
-	}
-	else if (pos < 0 && contract.currency == "USD") {
-		m_hedgeShortValue += -marketValue;
-	}
-}
-
-void MyEWrapper::accountDownloadEnd(const std::string&)
-{
-	if (!m_hedgePending) return;
-	m_pClient->reqAccountUpdates(false, m_account);
-	m_hedgePending = false;
-	adjustHedge();
-}
-
-// Buys or sells the hedge ETF so it is worth about as much as all the shorts.
-void MyEWrapper::adjustHedge()
-{
+	long long have = std::llround(hedgeShares());
+	if (have <= 0) return;
 	if (book) {
 		for (auto& [id, t] : book->orders)
-			if (t.symbol == kHedgeSymbol) return;  // last hedge order still filling
+			if (t.hedge) return;  // still selling
 	}
-
-	double price = m_hedgePrice;
-	if (price <= 0 && prices) {
-		std::optional<double> p = prices->get(kHedgeSymbol);
-		if (p) price = *p;
-	}
-	if (price <= 0) {
-		logPrintf("Hedge: no %s price, skipping\n", kHedgeSymbol.c_str());
-		return;
-	}
-
-	long long have = std::llround(hedgeShares());
-	long long target = static_cast<long long>(m_hedgeShortValue / price);
-	long long diff = target - have;
-	logPrintf("Hedge: short $%.0f, hedge holds %lld %s ($%.0f), target %lld shares\n",
-		m_hedgeShortValue, have, kHedgeSymbol.c_str(), have * price, target);
-	if (diff == 0 || std::abs(static_cast<double>(diff)) * price < kHedgeMinTrade) return;
-
-	int shares = static_cast<int>(std::llabs(diff));
 	Contract contr;
 	contr.symbol = kHedgeSymbol;
 	contr.secType = "STK";
 	contr.exchange = "SMART";
 	contr.currency = "USD";
-	Order o = adaptiveMarketOrder(diff > 0 ? "BUY" : "SELL", shares);
+	int shares = static_cast<int>(have);
+	Order o = adaptiveMarketOrder("SELL", shares);
 	placeAndRemember(contr, o, shares, 0.0, true);
-	logPrintf("Hedge order placed: %s %d %s (~$%.0f)\n", o.action.c_str(), shares, kHedgeSymbol.c_str(), shares * price);
+	logPrintf("Selling the old SPY hedge: SELL %d %s\n", shares, kHedgeSymbol.c_str());
 }
 
 void MyEWrapper::sendDailySummary(const std::string& positions)
@@ -644,7 +593,12 @@ void MyEWrapper::sendDailySummary(const std::string& positions)
 	if (!alerts) return;
 
 	std::string msg = "Market closed. Today's summary:\n" + alerts->takeDayFills() + "\n" + positions;
-	if (engine) msg += "\nGPT: " + engine->takeDayStats().describe();
+	if (engine) {
+		msg += "\nGPT: " + engine->takeDayStats().describe();
+		char mult[64];
+		std::snprintf(mult, sizeof(mult), "\nBuy multiplier: x%.2f", engine->buyMultiplier());
+		msg += mult;
+	}
 
 	std::vector<std::pair<std::string, double>> scores;
 	for (auto& [ticker, score] : gpt->snapshot())
@@ -665,7 +619,7 @@ void MyEWrapper::sendDailySummary(const std::string& positions)
 void MyEWrapper::mktOpen()
 {
 	m_state = ST_MARKET_OPEN;
-	m_lastHedge = std::chrono::steady_clock::now();  // first hedge check once the opening trades have filled
+	m_lastHedge = std::chrono::steady_clock::now();  // old hedge is sold once the opening trades have filled
 }
 
 void MyEWrapper::loadRebalanceMap()

@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -33,6 +34,9 @@ public:
 	long long minutesSinceLastLoop() const;
 	// GPT's calls since the last time this was called (for the daily summary).
 	Sentiment takeDayStats();
+	// How much bigger buy orders are made: WSB's bullish weight divided by its bearish
+	// weight over the last kSentimentDays days, limited to 0.5 - 3.
+	double buyMultiplier();
 
 private:
 	std::mutex clientMutex;
@@ -52,5 +56,7 @@ private:
 	std::atomic<long long> lastLoop{ 0 };  // steady_clock seconds
 	std::mutex statsMutex;
 	Sentiment hourStats, dayStats;
+	std::map<std::string, std::pair<double, double>> sentimentDays;  // NY date -> bullish, bearish weight (saved)
+	void addToSentimentDays(double confidence);
 	std::chrono::steady_clock::time_point lastHourLog = std::chrono::steady_clock::now();
 };
