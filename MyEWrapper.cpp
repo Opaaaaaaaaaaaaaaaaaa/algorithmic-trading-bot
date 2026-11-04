@@ -57,6 +57,7 @@ const double kStartValue = 1000000.0;
 const size_t kMaxPublicTrades = 60;
 
 const double kCrumbValue = 100.0;
+const double kMinPrice = 5.0;
 
 const int PING_DEADLINE = 2;
 const int SLEEP_BETWEEN_PINGS = 30; 
@@ -332,7 +333,8 @@ void MyEWrapper::executeTrades()
 		}
 
 		std::optional<double> price = prices ? prices->get(ticker) : std::nullopt;
-		if (!price) continue;  
+		if (!price) continue;
+		if (*price < kMinPrice) continue;
 
 		double dollarsPerPoint = score > 0 ? kDollarsPerPointBuy : kDollarsPerPointSell;
 		double dollars = std::abs(score) * dollarsPerPoint;
