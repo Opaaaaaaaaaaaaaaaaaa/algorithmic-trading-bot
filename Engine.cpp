@@ -242,20 +242,22 @@ bool Engine::canTradeNow()
     return c.tradingDay && c.timeOfDay >= kTradeStart && c.timeOfDay < c.close;
 }
 
+bool Engine::savedToday(const char* key)
+{
+    nlohmann::json last = state.get(key);
+    return last.is_string() && last.get<std::string>() == todayInNewYork();
+}
+
 bool Engine::rebalancedToday()
 {
-    std::string today = todayInNewYork();
-    for (const char* key : { "lastRebalance", "lastMarketOpen" }) {
-        nlohmann::json last = state.get(key);
-        if (last.is_string() && last.get<std::string>() == today) return true;
-    }
-    return false;
+    return savedToday("lastRebalance");
 }
 
 bool Engine::rebalanceDue()
 {
     NyClock c = nyClock();
-    return c.tradingDay && c.timeOfDay >= c.close - kRebalanceBeforeClose && c.timeOfDay < c.close && !rebalancedToday();
+    return c.tradingDay && c.timeOfDay >= c.close - kRebalanceBeforeClose && c.timeOfDay < c.close &&
+        !rebalancedToday() && !savedToday("lastMarketOpen");
 }
 
 void Engine::markRebalanced()

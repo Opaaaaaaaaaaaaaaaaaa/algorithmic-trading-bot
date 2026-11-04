@@ -40,6 +40,7 @@ public:
 
 private:
 	std::mutex clientMutex;
+	bool savedToday(const char* key);
 
 private:
 	APIGpt& gpt;
