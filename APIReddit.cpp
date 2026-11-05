@@ -36,24 +36,37 @@ void APIReddit::saveState()
 
 void APIReddit::init()
 {
-    cpr::Response token_res = cpr::Post(
-        cpr::Url{ "https://www.reddit.com/api/v1/access_token" },
-        cpr::Authentication{ client_id, client_secret, cpr::AuthMode::BASIC },
-        cpr::Header{ {"User-Agent", user_agent} },
-        cpr::Payload{
-            {"grant_type", "password"},
-            {"username", username},
-            {"password", password}
-        },
-        cpr::Timeout{ 30000 }
-    );
+    token.clear();
+    tokenExpiry = std::chrono::system_clock::now() + std::chrono::minutes(1);
 
-    nlohmann::json token_json = nlohmann::json::parse(token_res.text);
+    for (bool appOnly : { true, false }) {
+        cpr::Payload payload = appOnly
+            ? cpr::Payload{ {"grant_type", "client_credentials"} }
+            : cpr::Payload{ {"grant_type", "password"}, {"username", username}, {"password", password} };
 
-    token = token_json["access_token"];
+        cpr::Response r = cpr::Post(
+            cpr::Url{ "https://www.reddit.com/api/v1/access_token" },
+            cpr::Authentication{ client_id, client_secret, cpr::AuthMode::BASIC },
+            cpr::Header{ {"User-Agent", user_agent} },
+            payload,
+            cpr::Timeout{ 30000 }
+        );
 
-    int expires_in = token_json["expires_in"];  
-    tokenExpiry = std::chrono::system_clock::now() + std::chrono::seconds(expires_in - 60);
+        try {
+            nlohmann::json j = nlohmann::json::parse(r.text);
+            if (j.contains("access_token") && j["access_token"].is_string()) {
+                token = j["access_token"].get<std::string>();
+                int expiresIn = j.contains("expires_in") && j["expires_in"].is_number() ? j["expires_in"].get<int>() : 3600;
+                tokenExpiry = std::chrono::system_clock::now() + std::chrono::seconds(expiresIn - 60);
+                std::cout << "Reddit login OK (" << (appOnly ? "as the app, read-only" : "as your account") << ")\n";
+                return;
+            }
+        }
+        catch (const std::exception&) {}
+
+        std::cout << "Reddit login failed (" << (appOnly ? "as the app" : "as your account") << "): HTTP "
+                  << r.status_code << " " << r.text.substr(0, 200) << "\n";
+    }
 }
 
 bool APIReddit::fetch(std::string what)
@@ -61,6 +74,7 @@ bool APIReddit::fetch(std::string what)
     latestPayload = { {"data", nlohmann::json::array()} };
 
     if (std::chrono::system_clock::now() >= tokenExpiry) init();
+    if (token.empty()) return false;
 
     std::time_t now = time(NULL);
     std::time_t cutoff = now - cutofftime;
@@ -90,8 +104,13 @@ bool APIReddit::fetch(std::string what)
         ++requests;
 
         if (api_res.status_code != 200) {
-            std::cout << "API request failed: " << api_res.status_code << "\n";
-            std::cout << api_res.text << "\n";
+            if (api_res.text.find("blocked by network security") != std::string::npos)
+                std::cout << "Reddit request failed: HTTP " << api_res.status_code
+                          << ", Reddit's \"blocked by network security\" page\n";
+            else
+                std::cout << "Reddit request failed: HTTP " << api_res.status_code << " "
+                          << api_res.text.substr(0, 200) << "\n";
+            if (api_res.status_code == 401) tokenExpiry = std::chrono::system_clock::now();
             if (cnt == 0) return false;
             break;  
         }
