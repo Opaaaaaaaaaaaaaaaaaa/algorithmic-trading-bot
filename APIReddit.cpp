@@ -75,6 +75,7 @@ bool APIReddit::fetch(std::string what)
 
     if (std::chrono::system_clock::now() >= tokenExpiry) init();
     if (token.empty()) return false;
+    lastBlocked = false;
 
     std::time_t now = time(NULL);
     std::time_t cutoff = now - cutofftime;
@@ -104,7 +105,8 @@ bool APIReddit::fetch(std::string what)
         ++requests;
 
         if (api_res.status_code != 200) {
-            if (api_res.text.find("blocked by network security") != std::string::npos)
+            lastBlocked = api_res.text.find("blocked by network security") != std::string::npos;
+            if (lastBlocked)
                 std::cout << "Reddit request failed: HTTP " << api_res.status_code
                           << ", Reddit's \"blocked by network security\" page\n";
             else
@@ -184,7 +186,68 @@ bool APIReddit::fetch(std::string what)
 
 bool APIReddit::fetchComments()
 {
-    return fetch(commentsURL);
+    if (activeURL.empty()) activeURL = commentsURL;
+    bool ok = fetch(activeURL);
+    if (ok || !lastBlocked) return ok;
+
+    auto now = std::chrono::steady_clock::now();
+    if (lastCheck != std::chrono::steady_clock::time_point{} && now - lastCheck < std::chrono::minutes(30)) return false;
+    lastCheck = now;
+
+    std::string before = activeURL;
+    findWorkingUrl();
+    if (activeURL == before) return false;
+    return fetch(activeURL);
+}
+
+std::string APIReddit::checkUrl(const std::string& url)
+{
+    cpr::Response r = cpr::Get(
+        cpr::Url{ url },
+        cpr::Header{ {"Authorization", "bearer " + token}, {"User-Agent", user_agent} },
+        cpr::Parameters{ {"limit", "1"} },
+        cpr::Timeout{ 30000 }
+    );
+    if (r.status_code == 200) {
+        try {
+            nlohmann::json j = nlohmann::json::parse(r.text);
+            if (j.contains("data") && j["data"].contains("children")) return "";
+        }
+        catch (const std::exception&) {}
+        return "HTTP 200 but not a listing";
+    }
+    if (r.text.find("blocked by network security") != std::string::npos)
+        return "HTTP " + std::to_string(r.status_code) + " blocked";
+    return "HTTP " + std::to_string(r.status_code) + " " + r.text.substr(0, 100);
+}
+
+void APIReddit::findWorkingUrl()
+{
+    const std::vector<std::string> candidates = {
+        commentsURL,
+        commentsURL + ".json",
+        commentsURL + "/",
+        "https://oauth.reddit.com/r/wallstreetbets%2Fcomments",
+        postsURL,
+    };
+
+    std::cout << "Reddit is blocking the comments feed, checking other ways in:\n";
+    std::string found;
+    for (const std::string& url : candidates) {
+        std::string problem = checkUrl(url);
+        std::cout << "  " << url << ": " << (problem.empty() ? "works" : problem) << "\n";
+        if (problem.empty() && found.empty()) found = url;
+    }
+
+    if (found.empty()) {
+        std::cout << "Reddit check: nothing works, trying again in 30 min\n";
+        return;
+    }
+    if (found == postsURL)
+        std::cout << "Reddit check: only new posts work, reading post titles and text instead of comments\n";
+    else
+        std::cout << "Reddit check: reading comments from " << found << "\n";
+    activeURL = found;
 }
 
 bool APIReddit::fetchPosts()

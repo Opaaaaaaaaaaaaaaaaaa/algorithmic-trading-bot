@@ -8,6 +8,7 @@
 #include <ctime>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "State.h"
 
@@ -22,6 +23,8 @@ public:
 private:
     void init();
     bool fetch(std::string what);
+    std::string checkUrl(const std::string& url);
+    void findWorkingUrl();
     void loadState();
 
 private:
@@ -39,5 +42,8 @@ private:
     const std::string password = std::getenv("REDDIT_PASSWORD");
     const std::string user_agent;
     std::string token;
+    std::string activeURL;
+    bool lastBlocked = false;
+    std::chrono::steady_clock::time_point lastCheck;
     StateStore& state;
 };
